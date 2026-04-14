@@ -1055,10 +1055,16 @@ async function loadFromDrive(){
       return;
     }
     const token = getToken();
-    const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
-      { headers: { Authorization: 'Bearer ' + token } }
-    );
+    // 30-second timeout — prevents mobile hanging indefinitely on large files
+    const ctrl = new AbortController();
+    const timo = setTimeout(() => ctrl.abort(), 30000);
+    let res;
+    try {
+      res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,
+        { headers: { Authorization: 'Bearer ' + token }, signal: ctrl.signal }
+      );
+    } finally { clearTimeout(timo); }
     if(!res.ok) throw new Error('Drive read failed: ' + res.status);
     const data = await res.json();
     if(data && data.occasions){
@@ -1081,11 +1087,13 @@ async function loadFromDrive(){
     console.error('Drive load error:', msg);
     // Show specific error to help diagnose
     if(msg.includes('401') || msg.includes('403')){
-      showSaveIndicator('Auth expired — save will retry on next change', true);
-    } else if(msg.includes('Failed to fetch') || msg.includes('NetworkError')){
-      showSaveIndicator('No internet — showing cached data', true);
+      showSaveIndicator('Auth expired — please sign in again', true);
+    } else if(msg.includes('aborted') || msg.includes('abort') || msg.includes('timed out')){
+      showSaveIndicator('Drive load timed out — using local data', true);
+    } else if(msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')){
+      showSaveIndicator('No internet — using local data', true);
     } else {
-      showSaveIndicator('Drive sync failed: ' + msg.slice(0,40), true);
+      showSaveIndicator('Drive sync issue — using local data', true);
     }
   }
 }
@@ -1103,12 +1111,38 @@ async function saveToDrive(){
   isSaving = true;
   showSaveIndicator('Saving…', false);
   try {
-    const payload = JSON.stringify({
-      occasions:  S.occasions,
-      closet:     S.closet,
-      currentOcc: S.currentOcc,
-      savedAt:    new Date().toISOString(),
-    });
+    // ── Emergency size guard: if data > 3.5MB, shrink photos before upload ──
+    // Google Drive simple upload limit is 5MB — we stay well under it
+    let payloadObj = {occasions:S.occasions,closet:S.closet,currentOcc:S.currentOcc,savedAt:new Date().toISOString()};
+    let payload = JSON.stringify(payloadObj);
+    if(payload.length > 3_500_000){
+      showSaveIndicator('Reducing photo sizes…', false);
+      // Emergency compress: all base64 photos → 400px / 0.5 quality
+      async function emergencyCompress(b64){
+        if(!b64||!b64.startsWith('data:image')) return b64;
+        return new Promise(res=>{
+          const img=new Image(); img.onload=()=>{
+            let w=img.width,h=img.height,mp=400;
+            if(w>mp||h>mp){if(w>h){h=Math.round(h*mp/w);w=mp;}else{w=Math.round(w*mp/h);h=mp;}}
+            const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+            cv.getContext('2d').drawImage(img,0,0,w,h);
+            res(cv.toDataURL('image/jpeg',0.5));
+          }; img.onerror=()=>res(b64); img.src=b64;
+        });
+      }
+      for(const occ of S.occasions) for(const ev of occ.events) for(const look of ev.looks){
+        if(look.photos) for(let i=0;i<look.photos.length;i++) look.photos[i]=await emergencyCompress(look.photos[i]);
+        if(look.jewellery) for(const j of look.jewellery) if(j.img) j.img=await emergencyCompress(j.img);
+        if(look.shoes?.img) look.shoes.img=await emergencyCompress(look.shoes.img);
+      }
+      for(const item of S.closet){
+        if(item.imgs) for(let i=0;i<item.imgs.length;i++) item.imgs[i]=await emergencyCompress(item.imgs[i]);
+        if(item.img) item.img=await emergencyCompress(item.img);
+      }
+      payloadObj.occasions=S.occasions; payloadObj.closet=S.closet;
+      payload = JSON.stringify(payloadObj);
+      console.log(`Emergency compressed: ${Math.round(payload.length/1024)}KB`);
+    }
 
     if(!driveFileId){
       // Create the file first (metadata only)
@@ -1143,7 +1177,14 @@ async function saveToDrive(){
     showSaveIndicator('Saved to Drive ✓', true);
   } catch(e){
     console.error('Drive save error:', e);
-    showSaveIndicator('Save failed: ' + e.message, true);
+    const em = e.message||'';
+    if(em.includes('401')||em.includes('403')){
+      showSaveIndicator('Auth expired — please sign in again', true);
+    } else {
+      showSaveIndicator('Save failed — will retry', true);
+      // Reset hash so next autoSave retries
+      lastSavedHash = '';
+    }
   } finally {
     isSaving = false;
   }
@@ -1161,12 +1202,12 @@ async function compressAllExistingPhotos(){
   let changed = 0;
 
   async function compressBase64(b64){
-    // Only compress base64 images (not URLs), and only if large (>50KB)
-    if(!b64 || !b64.startsWith('data:image') || b64.length < 51200) return b64;
+    // Only compress base64 images (not URLs), and only if large (>30KB)
+    if(!b64 || !b64.startsWith('data:image') || b64.length < 30720) return b64;
     return new Promise(resolve=>{
       const img = new Image();
       img.onload = ()=>{
-        let w=img.width, h=img.height, maxPx=900;
+        let w=img.width, h=img.height, maxPx=700;
         if(w>maxPx||h>maxPx){
           if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
           else{w=Math.round(w*maxPx/h);h=maxPx;}
@@ -1174,7 +1215,7 @@ async function compressAllExistingPhotos(){
         const canvas=document.createElement('canvas');
         canvas.width=w; canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        const result=canvas.toDataURL('image/jpeg',0.72);
+        const result=canvas.toDataURL('image/jpeg',0.65);
         resolve(result);
       };
       img.onerror=()=>resolve(b64); // if it fails, keep original
@@ -1378,10 +1419,10 @@ function setGender(g){
 // ══ UPLOADS ══
 // ════════════════════════════════════════════
 // IMAGE COMPRESSION
-// Resizes to max 900px and compresses to ~80KB
-// Reduces a 4MB phone photo to ~60-100KB
+// Resizes to max 700px and compresses to ~30-45KB
+// Reduces a 4MB phone photo to under 40KB
 // ════════════════════════════════════════════
-function compressImage(file, maxPx=900, quality=0.72){
+function compressImage(file, maxPx=700, quality=0.65){
   return new Promise((resolve)=>{
     const reader = new FileReader();
     reader.onload = e => {
@@ -1405,7 +1446,7 @@ function compressImage(file, maxPx=900, quality=0.72){
   });
 }
 
-async function compressFiles(files, maxPx=900, quality=0.72){
+async function compressFiles(files, maxPx=700, quality=0.65){
   return Promise.all(Array.from(files).map(f => compressImage(f, maxPx, quality)));
 }
 
