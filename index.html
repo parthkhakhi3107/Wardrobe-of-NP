@@ -423,11 +423,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
         <button class="btn-outline" onclick="openAddClosetItem('shoes')">+ Shoes</button>
       </div>
     </div>
-    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:4px;">
       <button class="tab-btn active" style="color:var(--text);background:var(--gold-l);border-color:var(--gold);" data-cf="all" onclick="setClosetFilter('all',this)">All</button>
       <button class="tab-btn" data-cf="outfit" onclick="setClosetFilter('outfit',this)">Outfits</button>
       <button class="tab-btn" data-cf="jewellery" onclick="setClosetFilter('jewellery',this)">Jewellery</button>
       <button class="tab-btn" data-cf="shoes" onclick="setClosetFilter('shoes',this)">Shoes</button>
+    </div>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
+      <button class="tab-btn active" style="color:var(--text);background:var(--maroon-l);border-color:var(--maroon);" data-cg="all" onclick="setClosetGender('all',this)">👤 All</button>
+      <button class="tab-btn" data-cg="f" onclick="setClosetGender('f',this)">🌸 Nilomi</button>
+      <button class="tab-btn" data-cg="m" onclick="setClosetGender('m',this)">👔 Parth</button>
     </div>
     <div class="closet-grid" id="closet-grid"></div>
   </div>
@@ -612,6 +617,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="g2">
     <div><div class="fl">Name</div><input class="fi" id="ci-name"/></div>
     <div><div class="fl">Brand</div><input class="fi" id="ci-brand"/></div>
+  </div>
+  <div>
+    <div class="fl">Person</div>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button id="ci-gender-f" onclick="setCiGender('f')" style="flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--maroon);background:var(--maroon);color:#F5E4B0;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;font-weight:500;">🌸 Nilomi</button>
+      <button id="ci-gender-m" onclick="setCiGender('m')" style="flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--bdr2);background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;">👔 Parth</button>
+    </div>
   </div>
   <div>
     <div class="fl">Photos <span style="font-weight:400;opacity:.7;">(upload multiple)</span></div>
@@ -990,7 +1002,24 @@ async function findDriveFile(){
 }
 
 async function loadFromDrive(){
-  showSaveIndicator('Loading from Drive…', false);
+  // ── Step 1: Instantly load from localStorage cache (no delay) ──
+  const cached = localStorage.getItem('np_data_cache');
+  if(cached){
+    try {
+      const data = JSON.parse(cached);
+      if(data && data.occasions){
+        S.occasions  = data.occasions;
+        S.closet     = data.closet    || S.closet;
+        S.currentOcc = data.currentOcc || 0;
+        render();
+        // Compress any large existing photos in background
+        setTimeout(compressAllExistingPhotos, 500);
+      }
+    } catch(e){ console.warn('Cache parse error:', e); }
+  }
+
+  // ── Step 2: Sync from Drive in background ──
+  showSaveIndicator('Syncing with Drive…', false);
   try {
     driveFileId = await findDriveFile();
     if(!driveFileId){
@@ -1008,11 +1037,16 @@ async function loadFromDrive(){
       S.occasions  = data.occasions;
       S.closet     = data.closet    || S.closet;
       S.currentOcc = data.currentOcc || 0;
-      showSaveIndicator('Loaded from Drive ✓', true);
+      // Update local cache
+      localStorage.setItem('np_data_cache', JSON.stringify(data));
+      showSaveIndicator('Up to date ✓', true);
+      render();
+      // Compress any existing full-size photos in background
+      compressAllExistingPhotos();
     }
   } catch(e){
     console.error('Drive load error:', e);
-    showSaveIndicator('Using local data', true);
+    showSaveIndicator(cached ? 'Showing cached data' : 'Using local data', true);
   }
 }
 
@@ -1054,12 +1088,93 @@ async function saveToDrive(){
       }
     );
     if(!uploadRes.ok) throw new Error('Drive save failed: ' + uploadRes.status);
+    // Update local cache so next refresh is instant
+    localStorage.setItem('np_data_cache', payload);
     showSaveIndicator('Saved to Drive ✓', true);
   } catch(e){
     console.error('Drive save error:', e);
     showSaveIndicator('Save failed: ' + e.message, true);
   } finally {
     isSaving = false;
+  }
+}
+
+// ════════════════════════════════════════════
+// COMPRESS ALL EXISTING PHOTOS
+// Runs once in background after data loads
+// Silently replaces any large base64 images
+// ════════════════════════════════════════════
+let compressionDone = false;
+async function compressAllExistingPhotos(){
+  if(compressionDone) return;
+  compressionDone = true;
+  let changed = 0;
+
+  async function compressBase64(b64){
+    // Only compress base64 images (not URLs), and only if large (>50KB)
+    if(!b64 || !b64.startsWith('data:image') || b64.length < 51200) return b64;
+    return new Promise(resolve=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w=img.width, h=img.height, maxPx=900;
+        if(w>maxPx||h>maxPx){
+          if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}
+          else{w=Math.round(w*maxPx/h);h=maxPx;}
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        const result=canvas.toDataURL('image/jpeg',0.72);
+        resolve(result);
+      };
+      img.onerror=()=>resolve(b64); // if it fails, keep original
+      img.src=b64;
+    });
+  }
+
+  // Compress look photos
+  for(const occ of S.occasions){
+    for(const ev of occ.events){
+      for(const look of ev.looks){
+        if(look.photos){
+          for(let i=0;i<look.photos.length;i++){
+            const c=await compressBase64(look.photos[i]);
+            if(c!==look.photos[i]){look.photos[i]=c;changed++;}
+          }
+        }
+        // Jewellery photos
+        if(look.jewellery){
+          for(const j of look.jewellery){
+            if(j.img){const c=await compressBase64(j.img);if(c!==j.img){j.img=c;changed++;}}
+          }
+        }
+        // Shoe photo
+        if(look.shoes?.img){
+          const c=await compressBase64(look.shoes.img);
+          if(c!==look.shoes.img){look.shoes.img=c;changed++;}
+        }
+      }
+    }
+  }
+
+  // Compress closet photos
+  for(const item of S.closet){
+    if(item.imgs){
+      for(let i=0;i<item.imgs.length;i++){
+        const c=await compressBase64(item.imgs[i]);
+        if(c!==item.imgs[i]){item.imgs[i]=c;changed++;}
+      }
+    }
+    if(item.img){
+      const c=await compressBase64(item.img);
+      if(c!==item.img){item.img=c;changed++;}
+    }
+  }
+
+  if(changed>0){
+    console.log(`Compressed ${changed} existing photos`);
+    showSaveIndicator(`Optimised ${changed} photos ✓`, true);
+    autoSave(); // save the compressed versions
   }
 }
 
@@ -1162,6 +1277,8 @@ let evColor='#4A6741', outColors=[];
 let outPhotos=[];
 let copyLookRef=null;
 let closetItemType='outfit';
+let closetItemGender='f'; // gender being added to closet
+let closetGenderFilter='all'; // 'all','f','m'
 let evDragSrc=null, dragSrcLookId=null, dragSrcEvId=null;
 let cpickerType='jewellery', cpickerSelected=[];
 let jwlFromCloset=[], shoeFromCloset=null, outfitFromCloset=null;
@@ -1207,14 +1324,44 @@ function setGender(g){
 }
 
 // ══ UPLOADS ══
-function handleModalUpload(input,dataId,prevId){
+// ════════════════════════════════════════════
+// IMAGE COMPRESSION
+// Resizes to max 900px and compresses to ~80KB
+// Reduces a 4MB phone photo to ~60-100KB
+// ════════════════════════════════════════════
+function compressImage(file, maxPx=900, quality=0.72){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        // Calculate new dimensions
+        let w = img.width, h = img.height;
+        if(w > maxPx || h > maxPx){
+          if(w > h){ h = Math.round(h * maxPx / w); w = maxPx; }
+          else      { w = Math.round(w * maxPx / h); h = maxPx; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressFiles(files, maxPx=900, quality=0.72){
+  return Promise.all(Array.from(files).map(f => compressImage(f, maxPx, quality)));
+}
+
+async function handleModalUpload(input,dataId,prevId){
   const file=input.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    document.getElementById(dataId).value=e.target.result;
-    const p=document.getElementById(prevId); p.src=e.target.result; p.style.display='block';
-  };
-  reader.readAsDataURL(file);
+  const compressed = await compressImage(file);
+  document.getElementById(dataId).value=compressed;
+  const p=document.getElementById(prevId); p.src=compressed; p.style.display='block';
 }
 function handleModalUrl(input,dataId,prevId){
   const url=input.value.trim();
@@ -1224,16 +1371,16 @@ function handleModalUrl(input,dataId,prevId){
 }
 
 // Multi-photo upload for outfit
-function handleOutfitPhotos(input){
-  Array.from(input.files).forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      outPhotos.push(e.target.result);
-      renderOutPhotosPreview();
-      if(outPhotos.length===1) extractPalette(e.target.result);
-    };
-    reader.readAsDataURL(file);
+async function handleOutfitPhotos(input){
+  const files = Array.from(input.files); if(!files.length) return;
+  showSaveIndicator('Compressing photos…', false);
+  const compressed = await compressFiles(files);
+  compressed.forEach((src, i) => {
+    outPhotos.push(src);
+    if(i === 0 && outPhotos.length === 1) extractPalette(src);
   });
+  renderOutPhotosPreview();
+  showSaveIndicator('Photos ready ✓', true);
 }
 function renderOutPhotosPreview(){
   const wrap=document.getElementById('out-photos-preview');
@@ -1247,18 +1394,18 @@ function renderOutPhotosPreview(){
 function removeOutPhoto(i){outPhotos.splice(i,1);renderOutPhotosPreview();}
 
 // Card-level photo upload (adds to existing photos array)
-function uploadCardPhoto(input,evId,lid){
-  Array.from(input.files).forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      const look=findLook(evId,lid); if(!look) return;
-      look.photos=look.photos||[];
-      look.photos.push(e.target.result);
-      if(look.photos.length===1) extractPaletteForLook(e.target.result,evId,lid);
-      else renderOccasion();
-    };
-    reader.readAsDataURL(file);
+async function uploadCardPhoto(input,evId,lid){
+  const files = Array.from(input.files); if(!files.length) return;
+  showSaveIndicator('Compressing…', false);
+  const compressed = await compressFiles(files);
+  const look = findLook(evId,lid); if(!look) return;
+  look.photos = look.photos || [];
+  compressed.forEach((src, i) => {
+    look.photos.push(src);
+    if(i === 0 && look.photos.length === 1) extractPaletteForLook(src, evId, lid);
   });
+  if(compressed.length > 0) renderOccasion();
+  showSaveIndicator('Photos added ✓', true);
 }
 function extractPaletteForLook(src,evId,lid){
   const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
@@ -1832,11 +1979,11 @@ function addJwlRow(data){
   if(imgVal) setTimeout(()=>{const p=div.querySelector(`#jp-${idx}`);if(p){p.src=imgVal;}},0);
   container.appendChild(div);
 }
-function handleJwlUpload(input,idx){
+async function handleJwlUpload(input,idx){
   const file=input.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{document.getElementById(`ji-${idx}`).value=e.target.result;const p=document.getElementById(`jp-${idx}`);p.src=e.target.result;p.style.display='block';};
-  reader.readAsDataURL(file);
+  const compressed = await compressImage(file);
+  document.getElementById(`ji-${idx}`).value=compressed;
+  const p=document.getElementById(`jp-${idx}`); p.src=compressed; p.style.display='block';
 }
 function handleJwlUrl(input,idx){
   document.getElementById(`ji-${idx}`).value=input.value;
@@ -2021,7 +2168,11 @@ function openCopyLook(evId,lid){
 // ══ CLOSET ══
 function renderCloset(){
   const grid=document.getElementById('closet-grid'); grid.innerHTML='';
-  const list=S.closet.filter(i=>S.closetFilter==='all'||i.type===S.closetFilter);
+  const list=S.closet.filter(i=>{
+    const typeMatch = S.closetFilter==='all'||i.type===S.closetFilter;
+    const genderMatch = closetGenderFilter==='all'||(i.gender||'f')===closetGenderFilter;
+    return typeMatch && genderMatch;
+  });
   const icons={outfit:'👗',jewellery:'💍',shoes:'👠'};
   list.forEach(item=>{
     const card=document.createElement('div'); card.className='closet-card';
@@ -2045,7 +2196,10 @@ function renderCloset(){
     card.innerHTML=`
       ${photoHTML}
       <div class="closet-info">
-        <div class="closet-name">${item.name}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
+          <div class="closet-name" style="flex:1;min-width:0;">${item.name}</div>
+          <span style="font-size:11px;flex-shrink:0;">${(item.gender||'f')==='f'?'🌸':'👔'}</span>
+        </div>
         <div class="closet-sub">${item.brand||''}</div>
         ${item.notes?`<div style="font-size:9px;color:var(--muted);margin-top:2px;line-height:1.4;">${item.notes}</div>`:''}
       </div>
@@ -2083,27 +2237,50 @@ function setClosetFilter(f,btn){
   renderCloset();
 }
 
+function setClosetGender(g,btn){
+  closetGenderFilter=g;
+  document.querySelectorAll('[data-cg]').forEach(b=>{b.style.background='transparent';b.style.color='';b.style.borderColor='';});
+  btn.style.background='var(--maroon-l)'; btn.style.color='var(--maroon)'; btn.style.borderColor='var(--maroon)';
+  renderCloset();
+}
+
+function setCiGender(g){
+  closetItemGender=g;
+  const fBtn=document.getElementById('ci-gender-f');
+  const mBtn=document.getElementById('ci-gender-m');
+  if(!fBtn||!mBtn) return;
+  if(g==='f'){
+    fBtn.style.cssText='flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--maroon);background:var(--maroon);color:#F5E4B0;font-family:DM Sans,sans-serif;font-size:12px;cursor:pointer;font-weight:500;';
+    mBtn.style.cssText='flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--bdr2);background:transparent;color:var(--muted);font-family:DM Sans,sans-serif;font-size:12px;cursor:pointer;';
+  } else {
+    mBtn.style.cssText='flex:1;padding:7px;border-radius:8px;border:1.5px solid #1C3054;background:#1C3054;color:#F5E4B0;font-family:DM Sans,sans-serif;font-size:12px;cursor:pointer;font-weight:500;';
+    fBtn.style.cssText='flex:1;padding:7px;border-radius:8px;border:1.5px solid var(--bdr2);background:transparent;color:var(--muted);font-family:DM Sans,sans-serif;font-size:12px;cursor:pointer;';
+  }
+}
+
 // Temp storage for closet item photos being added/edited
 let ciPhotos = [];
 
-function openAddClosetItem(type){
+function openAddClosetItem(type, gender){
   editingClosetId=null; closetItemType=type; ciPhotos=[];
+  closetItemGender = gender || S.currentGender || 'f';
   document.getElementById('ci-ttl').textContent=`Add ${type.charAt(0).toUpperCase()+type.slice(1)} to Closet`;
   ['ci-name','ci-brand','ci-notes','ci-img-url'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('ci-photos-preview').innerHTML='';
+  setCiGender(closetItemGender);
   openModal('closet-item-modal');
 }
 
 function editClosetItem(itemId){
   const item=S.closet.find(i=>i.id===itemId); if(!item) return;
   editingClosetId=itemId; closetItemType=item.type;
-  // Migrate legacy single img to imgs array
   ciPhotos = item.imgs ? [...item.imgs] : (item.img ? [item.img] : []);
   document.getElementById('ci-ttl').textContent=`Edit ${item.type.charAt(0).toUpperCase()+item.type.slice(1)}`;
   document.getElementById('ci-name').value=item.name||'';
   document.getElementById('ci-brand').value=item.brand||'';
   document.getElementById('ci-notes').value=item.notes||'';
   document.getElementById('ci-img-url').value='';
+  setCiGender(item.gender||'f');
   renderCiPhotosPreview();
   openModal('closet-item-modal');
 }
@@ -2113,8 +2290,9 @@ function saveClosetItem(){
   const data={
     name, brand:document.getElementById('ci-brand').value.trim(),
     notes:document.getElementById('ci-notes').value.trim(),
+    gender:closetItemGender,
     imgs:[...ciPhotos],
-    img:ciPhotos[0]||'' // keep legacy img field for backward compat
+    img:ciPhotos[0]||''
   };
   if(editingClosetId){
     const idx=S.closet.findIndex(i=>i.id===editingClosetId);
@@ -2127,19 +2305,14 @@ function saveClosetItem(){
   closeModals(); renderCloset(); autoSave();
 }
 
-function handleClosetPhotos(input){
+async function handleClosetPhotos(input){
   const files=Array.from(input.files); if(!files.length) return;
-  let loaded=0;
-  files.forEach(file=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      ciPhotos.push(e.target.result);
-      loaded++;
-      if(loaded===files.length) renderCiPhotosPreview();
-    };
-    reader.readAsDataURL(file);
-  });
-  input.value=''; // allow re-selecting same file
+  showSaveIndicator('Compressing…', false);
+  const compressed = await compressFiles(files);
+  compressed.forEach(src => ciPhotos.push(src));
+  input.value='';
+  renderCiPhotosPreview();
+  showSaveIndicator('Photos ready ✓', true);
 }
 
 function handleClosetUrlAdd(input){
