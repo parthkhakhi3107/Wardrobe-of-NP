@@ -72,10 +72,43 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 /* Sidebar hidden on mobile, shown on desktop */
 .sidebar{width:200px;flex-shrink:0;background:var(--sb);border-right:1px solid var(--bdr);padding:12px 0;overflow-y:auto;display:flex;flex-direction:column;}
 @media(max-width:640px){
+  /* Topbar */
   .sidebar{display:none;}
-  .topbar-title{font-size:14px;}
+  .topbar{padding:0 8px;height:48px;}
+  .topbar-title{font-size:13px;}
   .topbar-center{gap:2px;}
-  .tab-btn{font-size:10px;padding:4px 8px;}
+  .tab-btn{font-size:10px;padding:4px 7px;}
+  .dark-toggle{padding:4px 8px;font-size:10px;}
+  #auth-area span:not([onclick]){display:none;} /* hide name on mobile, keep sign out */
+
+  /* Occasion header */
+  .occ-header{padding:10px;}
+  .occ-header-top{flex-direction:column;gap:8px;}
+  .occ-actions{width:100%;justify-content:flex-start;gap:4px;flex-wrap:wrap;}
+  .occ-actions .btn-outline{font-size:10px;padding:4px 8px;}
+  .gender-pill button{font-size:10px;padding:4px 9px;}
+
+  /* Event header — stop buttons overflowing */
+  .event-header{padding:8px 10px;gap:4px;}
+  .ev-name{font-size:12px;}
+  .ev-right{gap:4px;}
+  .ev-count{font-size:9px;padding:2px 5px;}
+
+  /* Look cards */
+  .looks-grid{grid-template-columns:repeat(2,1fr);gap:7px;padding:7px;}
+  .look-btns{flex-wrap:wrap;gap:2px;padding:0 4px 6px;}
+  .lbtn{font-size:8px;padding:3px 2px;flex:1;min-width:28%;}
+
+  /* Content padding */
+  .content{padding:8px;gap:8px;}
+}
+
+@media(max-width:380px){
+  /* Very small phones */
+  .tab-btn{font-size:9px;padding:3px 5px;}
+  .topbar-title{font-size:12px;}
+  .occ-actions{gap:3px;}
+  .occ-actions .btn-outline{font-size:9px;padding:3px 6px;}
 }
 .sidebar-label{font-size:9px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 12px 7px;}
 .occ-item{padding:8px 12px;cursor:pointer;border-left:3px solid transparent;transition:all .15s;}
@@ -755,28 +788,40 @@ window.addEventListener('load', async () => {
   const email = getStoredEmail();
 
   if(token && email){
-    // We have a valid stored token — skip sign-in entirely
     setAuthStatus('Loading your wardrobe…');
+    // Try to restore — if gapi fails, still show the app with stored data
     try {
-      // Init gapi so we can make Drive calls
       await loadGapiOnly();
-      // Set the token on gapi client
-      gapi.client.setToken({ access_token: token });
-      // Set user from stored email
-      currentUser = { email, given_name: email.split('@')[0], picture: '' };
-      hideAuthScreen();
-      renderAuthArea();
-      await loadFromDrive();
-      render();
     } catch(e){
-      console.warn('Session restore failed:', e.message);
-      // Token may have expired — clear it and show login
-      clearStoredToken();
-      showAuthScreen();
-      setAuthStatus('Session expired — please sign in again.');
+      console.warn('gapi load failed:', e.message);
+      // gapi failed but we still have token — continue anyway
+      // Drive calls will fail gracefully
     }
+    try {
+      gapi.client.setToken({ access_token: token });
+    } catch(e){
+      console.warn('setToken failed:', e.message);
+    }
+    // Always restore the user session — don't clear token just because gapi had trouble
+    currentUser = { email, given_name: email.split('@')[0], picture: '' };
+    hideAuthScreen();
+    renderAuthArea();
+    try {
+      await loadFromDrive();
+    } catch(e){
+      console.warn('Drive load failed on restore:', e.message);
+      // If Drive fails with 401, token really expired — clear and ask to login
+      if(e.message && (e.message.includes('401') || e.message.includes('403'))){
+        clearStoredToken();
+        currentUser = null;
+        showAuthScreen();
+        setAuthStatus('Session expired — please sign in again.');
+        return;
+      }
+      // Other errors (network etc) — show app anyway with local sample data
+    }
+    render();
   } else {
-    // No stored token — show login screen
     showAuthScreen();
   }
 });
@@ -785,6 +830,25 @@ window.addEventListener('load', async () => {
 function loadGapiOnly(){
   return new Promise((resolve, reject) => {
     if(gapiInited){ resolve(); return; }
+    // Check if script already in DOM (e.g. from a previous load attempt)
+    if(document.querySelector('script[src*="apis.google.com/js/api"]')){
+      // Script tag exists, wait for gapi to be available
+      let attempts = 0;
+      const wait = setInterval(()=>{
+        attempts++;
+        if(typeof gapi !== 'undefined'){
+          clearInterval(wait);
+          gapi.load('client', async () => {
+            try {
+              if(!gapiInited) await gapi.client.init({ apiKey: CONFIG.API_KEY });
+              gapiInited = true;
+              resolve();
+            } catch(e){ resolve(); } // resolve anyway — don't block app
+          });
+        } else if(attempts > 20){ clearInterval(wait); resolve(); } // give up after 2s
+      }, 100);
+      return;
+    }
     const s = document.createElement('script');
     s.src = 'https://apis.google.com/js/api.js';
     s.async = true;
@@ -794,10 +858,10 @@ function loadGapiOnly(){
           await gapi.client.init({ apiKey: CONFIG.API_KEY });
           gapiInited = true;
           resolve();
-        } catch(e){ reject(e); }
+        } catch(e){ resolve(); } // resolve anyway — don't block app
       });
     };
-    s.onerror = () => reject(new Error('Failed to load gapi'));
+    s.onerror = () => resolve(); // resolve anyway — don't block app
     document.head.appendChild(s);
   });
 }
@@ -849,10 +913,17 @@ async function handleTokenResponse(resp){
   // Store the token so next open skips sign-in
   const accessToken = resp.access_token;
   saveToken(accessToken);
-  gapi.client.setToken({ access_token: accessToken });
+  try { gapi.client.setToken({ access_token: accessToken }); } catch(e){}
 
-  // Set user from stored email or a default
-  const email = getStoredEmail() || 'houseofnp75@gmail.com';
+  // Try to decode email from JWT, fallback to stored, fallback to default
+  let email = '';
+  try {
+    if(resp.id_token){
+      const payload = JSON.parse(atob(resp.id_token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+      email = payload.email || '';
+    }
+  } catch(e){}
+  if(!email) email = getStoredEmail() || 'houseofnp75@gmail.com';
   localStorage.setItem(CONFIG.USER_KEY, email);
   currentUser = { email, given_name: email.split('@')[0], picture: '' };
 
