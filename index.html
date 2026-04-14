@@ -1689,7 +1689,7 @@ function renderOccasion(){
     c.appendChild(card);
   });
   if(!o.events.length) c.innerHTML=`<div class="empty-state"><div style="font-size:28px;opacity:.3;">🌸</div><div>No events yet</div></div>`;
-  setTimeout(()=>{initLookDrag();initSwipers();},60);
+  setTimeout(()=>{initLookDrag();initSwipers();fillDeferredImages();},60);
 }
 
 function toggleEv(eid){const ev=getOcc()?.events.find(e=>e.id===eid);if(ev){ev.open=!ev.open;renderOccasion();}}
@@ -1756,6 +1756,7 @@ function renderLookCards(ev,looks){
   const accIcon=g==='m'?'⌚':'💍';
   const footIcon=g==='m'?'👞':'👠';
   const displayLooks=looks||ev.looks;
+  // KEY PERF: NO base64 data in innerHTML — use data-ref attributes, fill src after DOM insert
   let h=displayLooks.map(look=>{
     const cid=`${ev.id}-${look.id}`;
     const photos=look.photos||[];
@@ -1765,8 +1766,9 @@ function renderLookCards(ev,looks){
     if(photos.length>0){
       const dots=photos.length>1?`<div class="swiper-dots">${photos.map((_,i)=>`<div class="swiper-dot${i===0?' active':''}"></div>`).join('')}</div>`:'';
       const arrows=photos.length>1?`<button class="swiper-prev" onclick="swiperPrev('${cid}')">‹</button><button class="swiper-next" onclick="swiperNext('${cid}')">›</button>`:'';
-      swiperHTML=`<div class="photo-swiper" data-cid="${cid}">
-        <div class="swiper-track">${photos.map(p=>`<div class="swiper-slide"><img src="${p}" alt="" loading="lazy"/></div>`).join('')}</div>
+      // Empty img tags — src set by fillPhotoSrcs() after DOM insert
+      swiperHTML=`<div class="photo-swiper" data-cid="${cid}" data-eid="${ev.id}" data-lid="${look.id}">
+        <div class="swiper-track">${photos.map((_,i)=>`<div class="swiper-slide"><img class="deferred-img" data-eid="${ev.id}" data-lid="${look.id}" data-pidx="${i}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>`).join('')}</div>
         ${dots}${arrows}
         <div class="status-dot s-${look.status}"></div>
       </div>`;
@@ -1776,12 +1778,13 @@ function renderLookCards(ev,looks){
         <div class="status-dot s-${look.status}"></div>
       </div>`;
     }
-    const jwlHTML=(look.jewellery||[]).slice(0,3).map(j=>{
-      const img=j.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j.img||'';
-      return `<div class="acc-thumb" title="${j.name}">${img?`<img src="${img}" loading="lazy"/>`:`${accIcon}`}</div>`;
+    // Acc thumbs — no src in HTML, filled after insert
+    const jwlHTML=(look.jewellery||[]).slice(0,3).map((j,ji)=>{
+      const hasImg=j.type==='closet'?!!(S.closet.find(i=>i.id===j.closetId)?.img):!!j.img;
+      return `<div class="acc-thumb" title="${j.name}">${hasImg?`<img class="deferred-acc" data-eid="${ev.id}" data-lid="${look.id}" data-atype="j" data-aidx="${ji}" alt=""/>`:accIcon}</div>`;
     }).join('');
-    const shoeImg=look.shoes?.type==='closet'?S.closet.find(i=>i.id===look.shoes.closetId)?.img||'':look.shoes?.img||'';
-    const shoeHTML=look.shoes?.name?`<div class="acc-thumb" title="${look.shoes.name}">${shoeImg?`<img src="${shoeImg}"/>`:`${footIcon}`}</div>`:'';
+    const hasShoe=look.shoes?.type==='closet'?!!(S.closet.find(i=>i.id===look.shoes?.closetId)?.img):!!look.shoes?.img;
+    const shoeHTML=look.shoes?.name?`<div class="acc-thumb" title="${look.shoes.name}">${hasShoe?`<img class="deferred-acc" data-eid="${ev.id}" data-lid="${look.id}" data-atype="s" alt=""/>`:footIcon}</div>`:'';
     const checkHTML=(look.checklist||[]).slice(0,2).map((c,ci)=>`<div class="check-item ${c.done?'done':'check-pending'}"><input type="checkbox" ${c.done?'checked':''} onchange="toggleCheck(event,${ev.id},${look.id},${ci})"/>${c.text}</div>`).join('');
     const lastC=look.comments?.slice(-1)[0];
     return `
@@ -1823,6 +1826,31 @@ function renderLookCards(ev,looks){
     <button class="add-look-card" onclick="openAddLook(${ev.id})"><span style="font-size:22px;">+</span><span>Add ${g==='m'?'Parth':'Nilomi'}'s Look</span></button>
   </div>`;
   return h;
+}
+
+// Fill deferred image srcs after DOM insert — called by initSwipers
+function fillDeferredImages(container){
+  // Outfit swiper photos
+  (container||document).querySelectorAll('img.deferred-img').forEach(img=>{
+    if(img.src && !img.src.endsWith('/')) return; // already filled
+    const look=findLook(parseInt(img.dataset.eid),parseInt(img.dataset.lid));
+    const src=(look?.photos||[])[parseInt(img.dataset.pidx||0)];
+    if(src) img.src=src;
+  });
+  // Acc thumbs
+  (container||document).querySelectorAll('img.deferred-acc').forEach(img=>{
+    if(img.src && !img.src.endsWith('/')) return;
+    const look=findLook(parseInt(img.dataset.eid),parseInt(img.dataset.lid));
+    if(!look) return;
+    let src='';
+    if(img.dataset.atype==='j'){
+      const j=(look.jewellery||[])[parseInt(img.dataset.aidx||0)];
+      src=j?.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j?.img||'';
+    } else {
+      src=look.shoes?.type==='closet'?S.closet.find(i=>i.id===look.shoes.closetId)?.img||'':look.shoes?.img||'';
+    }
+    if(src) img.src=src;
+  });
 }
 function isInCombo(lid){return getOcc()?.combos?.some(c=>c.lookId===lid);}
 function toggleCheck(e,eid,lid,idx){
@@ -2222,15 +2250,15 @@ function renderCloset(){
     const ccid = `ci-${item.id}`;
     let photoHTML = '';
     if(imgs.length > 1){
-      photoHTML = `<div class="photo-swiper" data-cid="${ccid}" style="aspect-ratio:1;">
-        <div class="swiper-track">${imgs.map(p=>`<div class="swiper-slide"><img src="${p}" alt="" loading="lazy"/></div>`).join('')}</div>
+      photoHTML = `<div class="photo-swiper" data-cid="${ccid}" data-itemid="${item.id}" style="aspect-ratio:1;">
+        <div class="swiper-track">${imgs.map((_,i)=>`<div class="swiper-slide"><img class="deferred-closet-swiper" data-itemid="${item.id}" data-pidx="${i}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>`).join('')}</div>
         <div class="swiper-dots">${imgs.map((_,i)=>`<div class="swiper-dot${i===0?' active':''}"></div>`).join('')}</div>
         <button class="swiper-prev" onclick="swiperPrev('${ccid}')">‹</button>
         <button class="swiper-next" onclick="swiperNext('${ccid}')">›</button>
         <div class="ct-badge ct-${item.type}" style="z-index:3;">${item.type}</div>
       </div>`;
     } else if(imgs.length === 1){
-      photoHTML = `<div class="closet-photo"><img src="${imgs[0]}" loading="lazy"/><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
+      photoHTML = `<div class="closet-photo"><img class="deferred-closet" data-cid="${item.id}" alt="" style="width:100%;height:100%;object-fit:cover;"/><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
     } else {
       photoHTML = `<div class="closet-photo"><span class="closet-placeholder">${icons[item.type]}</span><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
     }
@@ -2263,6 +2291,22 @@ function renderCloset(){
   add.style.cssText='border:1.5px dashed var(--bdr2);display:flex;align-items:center;justify-content:center;min-height:160px;cursor:pointer;';
   add.innerHTML=`<div style="text-align:center;color:var(--gold-d);font-size:12px;"><div style="font-size:22px;margin-bottom:4px;">+</div>Add Item</div>`;
   add.onclick=()=>openAddClosetItem('outfit'); grid.appendChild(add);
+  // Fill deferred images after DOM is built
+  requestAnimationFrame(()=>{
+    grid.querySelectorAll('img.deferred-closet').forEach(img=>{
+      const item=S.closet.find(i=>i.id===parseInt(img.dataset.cid));
+      const imgs=item?.imgs?.length?item.imgs:(item?.img?[item.img]:[]);
+      if(imgs[0]) img.src=imgs[0];
+    });
+    // Swiper closet cards (multi-photo)
+    grid.querySelectorAll('img.deferred-closet-swiper').forEach(img=>{
+      if(img.src && !img.src.endsWith('/')) return;
+      const item=S.closet.find(i=>i.id===parseInt(img.dataset.itemid));
+      const imgs=item?.imgs?.length?item.imgs:(item?.img?[item.img]:[]);
+      const src=imgs[parseInt(img.dataset.pidx||0)];
+      if(src) img.src=src;
+    });
+  });
 }
 
 function deleteClosetItem(itemId){
