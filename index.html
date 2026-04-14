@@ -1012,8 +1012,9 @@ async function loadFromDrive(){
         S.closet     = data.closet    || S.closet;
         S.currentOcc = data.currentOcc || 0;
         render();
-        // Compress any large existing photos in background
-        setTimeout(compressAllExistingPhotos, 500);
+        // Compress in background when browser is idle — never blocks UI
+        if(window.requestIdleCallback) requestIdleCallback(()=>compressAllExistingPhotos());
+        else setTimeout(compressAllExistingPhotos, 2000);
       }
     } catch(e){ console.warn('Cache parse error:', e); }
   }
@@ -1041,8 +1042,9 @@ async function loadFromDrive(){
       localStorage.setItem('np_data_cache', JSON.stringify(data));
       showSaveIndicator('Up to date ✓', true);
       render();
-      // Compress any existing full-size photos in background
-      compressAllExistingPhotos();
+      // Compress in background when browser is idle
+      if(window.requestIdleCallback) requestIdleCallback(()=>compressAllExistingPhotos());
+      else setTimeout(compressAllExistingPhotos, 2000);
     }
   } catch(e){
     console.error('Drive load error:', e);
@@ -1050,9 +1052,16 @@ async function loadFromDrive(){
   }
 }
 
+let lastSavedHash = '';
 async function saveToDrive(){
   if(!currentUser || isSaving) return;
   const token = getToken(); if(!token) return;
+  // Skip if nothing changed (compare hash of data without photos for speed)
+  const dataStr = JSON.stringify({occasions:S.occasions,closet:S.closet,currentOcc:S.currentOcc});
+  // Quick hash: length + first+last 100 chars
+  const quickHash = dataStr.length + dataStr.slice(0,100) + dataStr.slice(-100);
+  if(quickHash === lastSavedHash){ return; }
+  lastSavedHash = quickHash;
   isSaving = true;
   showSaveIndicator('Saving…', false);
   try {
@@ -1182,15 +1191,17 @@ async function compressAllExistingPhotos(){
 function autoSave(){
   if(!currentUser) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveToDrive, 1500);
+  saveTimer = setTimeout(saveToDrive, 3000);
 }
 
+let saveIndicatorTimer=null;
 function showSaveIndicator(msg, fadeOut){
   const el = document.getElementById('save-indicator');
   if(!el) return;
   el.textContent = msg;
   el.style.opacity = '1';
-  if(fadeOut) setTimeout(()=>{ el.style.opacity='0'; }, 2500);
+  clearTimeout(saveIndicatorTimer);
+  if(fadeOut) saveIndicatorTimer=setTimeout(()=>{ el.style.opacity='0'; }, 2500);
 }
 
 
@@ -1312,7 +1323,7 @@ function showTab(t){
     else{b.style.background='transparent';b.style.color='#F5E4B0';}
   });
   if(t==='history') renderHistory();
-  if(t==='closet') renderCloset();
+  if(t==='closet') renderCloset(); // renderCloset is fast, always fresh
 }
 function setGender(g){
   S.currentGender=g;
@@ -1404,7 +1415,7 @@ async function uploadCardPhoto(input,evId,lid){
     look.photos.push(src);
     if(i === 0 && look.photos.length === 1) extractPaletteForLook(src, evId, lid);
   });
-  if(compressed.length > 0) renderOccasion();
+  if(compressed.length > 0) renderOccasionDebounced(100);
   showSaveIndicator('Photos added ✓', true);
 }
 function extractPaletteForLook(src,evId,lid){
@@ -1555,7 +1566,7 @@ function updateSwiper(cid){
 }
 
 // ══ RENDER ══
-function render(){renderSidebar();renderOccasion();autoSave();}
+function render(){renderSidebar();renderOccasion();}
 
 function renderSidebar(){
   const el=document.getElementById('occ-list'); el.innerHTML='';
@@ -1627,6 +1638,11 @@ function showUnsorted(){
     issues.map(i=>`<div class="unsorted-item"><div style="width:7px;height:7px;border-radius:50%;background:${i.color};flex-shrink:0;"></div><div style="flex:1;min-width:0;"><strong>${i.look}</strong> · ${i.ev}</div><div style="flex-shrink:0;font-size:10px;color:var(--maroon-m);">${i.reason}</div></div>`).join('');
 }
 
+let renderOccTimer=null;
+function renderOccasionDebounced(delay=50){
+  clearTimeout(renderOccTimer);
+  renderOccTimer=setTimeout(renderOccasion,delay);
+}
 function renderOccasion(){
   const o=getOcc(); if(!o) return;
   const g=S.currentGender;
@@ -1750,7 +1766,7 @@ function renderLookCards(ev,looks){
       const dots=photos.length>1?`<div class="swiper-dots">${photos.map((_,i)=>`<div class="swiper-dot${i===0?' active':''}"></div>`).join('')}</div>`:'';
       const arrows=photos.length>1?`<button class="swiper-prev" onclick="swiperPrev('${cid}')">‹</button><button class="swiper-next" onclick="swiperNext('${cid}')">›</button>`:'';
       swiperHTML=`<div class="photo-swiper" data-cid="${cid}">
-        <div class="swiper-track">${photos.map(p=>`<div class="swiper-slide"><img src="${p}" alt=""/></div>`).join('')}</div>
+        <div class="swiper-track">${photos.map(p=>`<div class="swiper-slide"><img src="${p}" alt="" loading="lazy"/></div>`).join('')}</div>
         ${dots}${arrows}
         <div class="status-dot s-${look.status}"></div>
       </div>`;
@@ -1762,7 +1778,7 @@ function renderLookCards(ev,looks){
     }
     const jwlHTML=(look.jewellery||[]).slice(0,3).map(j=>{
       const img=j.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j.img||'';
-      return `<div class="acc-thumb" title="${j.name}">${img?`<img src="${img}"/>`:`${accIcon}`}</div>`;
+      return `<div class="acc-thumb" title="${j.name}">${img?`<img src="${img}" loading="lazy"/>`:`${accIcon}`}</div>`;
     }).join('');
     const shoeImg=look.shoes?.type==='closet'?S.closet.find(i=>i.id===look.shoes.closetId)?.img||'':look.shoes?.img||'';
     const shoeHTML=look.shoes?.name?`<div class="acc-thumb" title="${look.shoes.name}">${shoeImg?`<img src="${shoeImg}"/>`:`${footIcon}`}</div>`:'';
@@ -1779,7 +1795,7 @@ function renderLookCards(ev,looks){
       ${paletteHTML}
       <div class="acc-row">
         ${jwlHTML}${shoeHTML}
-        ${pending?`<div style="margin-left:auto;font-size:9px;color:var(--maroon-m);align-self:center;">⚠ ${pending}</div>`:''}
+        <div class="pending-badge" style="margin-left:auto;font-size:9px;color:var(--maroon-m);align-self:center;">${pending?`⚠ ${pending}`:''}</div>
       </div>
       <div class="look-info">
         <div class="look-name">${look.name}</div>
@@ -1812,15 +1828,40 @@ function isInCombo(lid){return getOcc()?.combos?.some(c=>c.lookId===lid);}
 function toggleCheck(e,eid,lid,idx){
   e.stopPropagation();
   const look=findLook(eid,lid);
-  if(look?.checklist[idx]) look.checklist[idx].done=!look.checklist[idx].done;
-  renderOccasion(); autoSave();
+  if(look?.checklist[idx]){
+    look.checklist[idx].done=e.target.checked;
+    // Update just the pending count badge — no full re-render
+    const card=document.querySelector(`.look-card[data-lid="${lid}"]`);
+    if(card){
+      const pending=(look.checklist||[]).filter(c=>!c.done).length;
+      const badge=card.querySelector('.pending-badge');
+      if(badge) badge.textContent=pending?`⚠ ${pending}`:'';
+      // Update done styling on the check-item
+      const items=card.querySelectorAll('.check-item');
+      if(items[idx]) items[idx].className='check-item '+(e.target.checked?'done':'check-pending');
+    }
+    autoSave();
+  }
 }
 function submitComment(eid,lid,input){
   const txt=input.value.trim(); if(!txt) return;
   const look=findLook(eid,lid); if(!look) return;
   look.comments=look.comments||[];
-  look.comments.push({author:'Me',text:txt,ts:new Date().toLocaleDateString('en-IN',{month:'short',day:'numeric'})});
-  input.value=''; renderOccasion(); autoSave();
+  const ts=new Date().toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+  look.comments.push({author:'Me',text:txt,ts});
+  input.value='';
+  // Update just the comment bubble in-place
+  const card=document.querySelector(`.look-card[data-lid="${lid}"]`);
+  if(card){
+    const bubble=card.querySelector('.comment-bubble');
+    const newBubble=`<div class="comment-bubble"><span class="comment-author">Me:</span>${txt}</div>`;
+    if(bubble) bubble.outerHTML=newBubble;
+    else{
+      const row=card.querySelector('.comment-input-row');
+      if(row) row.insertAdjacentHTML('beforebegin',newBubble);
+    }
+  }
+  autoSave();
 }
 
 // ── LOOK DRAG (cross-event) ──
@@ -2112,7 +2153,7 @@ function buildDetailHTML(look){
     ${(look.jewellery||[]).length?`
       <div class="detail-section">💍 Jewellery</div>
       <div class="acc-detail-grid">
-        ${look.jewellery.map(j=>{const img=j.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j.img||''; return `<div class="acc-detail-card"><div class="acc-detail-photo">${img?`<img src="${img}"/>`:'💍'}</div><div class="acc-detail-info">${j.name}</div><div class="acc-detail-brand">${j.brand}</div></div>`;}).join('')}
+        ${look.jewellery.map(j=>{const img=j.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j.img||''; return `<div class="acc-detail-card"><div class="acc-detail-photo">${img?`<img src="${img}" loading="lazy"/>`:'💍'}</div><div class="acc-detail-info">${j.name}</div><div class="acc-detail-brand">${j.brand}</div></div>`;}).join('')}
       </div>`:''}
     ${look.shoes?.name?`
       <div class="detail-section">👠 Shoes</div>
@@ -2182,14 +2223,14 @@ function renderCloset(){
     let photoHTML = '';
     if(imgs.length > 1){
       photoHTML = `<div class="photo-swiper" data-cid="${ccid}" style="aspect-ratio:1;">
-        <div class="swiper-track">${imgs.map(p=>`<div class="swiper-slide"><img src="${p}" alt=""/></div>`).join('')}</div>
+        <div class="swiper-track">${imgs.map(p=>`<div class="swiper-slide"><img src="${p}" alt="" loading="lazy"/></div>`).join('')}</div>
         <div class="swiper-dots">${imgs.map((_,i)=>`<div class="swiper-dot${i===0?' active':''}"></div>`).join('')}</div>
         <button class="swiper-prev" onclick="swiperPrev('${ccid}')">‹</button>
         <button class="swiper-next" onclick="swiperNext('${ccid}')">›</button>
         <div class="ct-badge ct-${item.type}" style="z-index:3;">${item.type}</div>
       </div>`;
     } else if(imgs.length === 1){
-      photoHTML = `<div class="closet-photo"><img src="${imgs[0]}"/><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
+      photoHTML = `<div class="closet-photo"><img src="${imgs[0]}" loading="lazy"/><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
     } else {
       photoHTML = `<div class="closet-photo"><span class="closet-placeholder">${icons[item.type]}</span><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
     }
