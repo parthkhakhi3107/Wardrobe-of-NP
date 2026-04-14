@@ -660,6 +660,11 @@ const CONFIG = {
   API_KEY:   'AIzaSyAv_SPucJYS5U-BBguIiAUR4rZfHlQFY2Y',
   SCOPES:    'https://www.googleapis.com/auth/drive.appdata',
   FILE_NAME: 'wardrobe-of-np-data.json',
+  // Token is valid for 1 hour — we store it and reuse it
+  // Re-auth only when it expires or is missing
+  TOKEN_KEY:  'np_access_token',
+  TOKEN_EXP:  'np_token_expiry',
+  USER_KEY:   'np_user_email',
 };
 
 // ════════════════════════════════════════════
@@ -673,34 +678,52 @@ let currentUser = null;
 let saveTimer   = null;
 let isSaving    = false;
 
-// Load Google scripts dynamically when user clicks sign in
+// ── Token helpers ──
+function saveToken(accessToken){
+  const expiry = Date.now() + 55 * 60 * 1000; // 55 min (token lasts 60)
+  localStorage.setItem(CONFIG.TOKEN_KEY, accessToken);
+  localStorage.setItem(CONFIG.TOKEN_EXP, expiry.toString());
+}
+function getStoredToken(){
+  const token  = localStorage.getItem(CONFIG.TOKEN_KEY);
+  const expiry = parseInt(localStorage.getItem(CONFIG.TOKEN_EXP) || '0');
+  if(!token || Date.now() > expiry) return null; // expired or missing
+  return token;
+}
+function clearStoredToken(){
+  localStorage.removeItem(CONFIG.TOKEN_KEY);
+  localStorage.removeItem(CONFIG.TOKEN_EXP);
+  localStorage.removeItem(CONFIG.USER_KEY);
+}
+function getStoredEmail(){
+  return localStorage.getItem(CONFIG.USER_KEY) || '';
+}
+
+// ── Load Google scripts ──
 function loadGoogleLibraries(callback){
   let gapiDone = false, gisDone = false;
   function check(){ if(gapiDone && gisDone) callback(); }
 
-  // GAPI
+  // Already loaded?
+  if(gapiInited && gisInited){ callback(); return; }
+
   const s1 = document.createElement('script');
   s1.src = 'https://apis.google.com/js/api.js';
   s1.async = true;
   s1.onload = () => {
     gapi.load('client', async () => {
       try {
-        await gapi.client.init({
-          apiKey: CONFIG.API_KEY,
-        });
-        gapiInited = true;
-        gapiDone = true;
-        check();
+        await gapi.client.init({ apiKey: CONFIG.API_KEY });
+        gapiInited = true; gapiDone = true; check();
       } catch(e){
-        setAuthStatus('Google API error: ' + (e.result?.error?.message || e.message || 'Check your API Key'));
+        setAuthStatus('Google API error: ' + (e.result?.error?.message || e.message));
         resetSignInBtn();
       }
     });
   };
-  s1.onerror = () => { setAuthStatus('Failed to load Google API. Check internet connection.'); resetSignInBtn(); };
+  s1.onerror = () => { setAuthStatus('Cannot reach Google — check your connection.'); resetSignInBtn(); };
   document.head.appendChild(s1);
 
-  // GIS
   const s2 = document.createElement('script');
   s2.src = 'https://accounts.google.com/gsi/client';
   s2.async = true;
@@ -711,51 +734,86 @@ function loadGoogleLibraries(callback){
         scope: CONFIG.SCOPES,
         callback: handleTokenResponse,
         error_callback: (err) => {
-          console.error('GIS error_callback:', err);
-          const msg = err.message || err.type || 'Check your Client ID and that your site URL is in Authorised JavaScript Origins';
-          setAuthStatus('Sign-in error: ' + msg);
+          console.error('GIS error:', err);
+          setAuthStatus('Sign-in error: ' + (err.message || err.type || 'Unknown'));
           resetSignInBtn();
         }
       });
-      gisInited = true;
-      gisDone = true;
-      check();
+      gisInited = true; gisDone = true; check();
     } catch(e){
-      setAuthStatus('Google Sign-In init error: ' + e.message);
+      setAuthStatus('Sign-In init error: ' + e.message);
       resetSignInBtn();
     }
   };
-  s2.onerror = () => { setAuthStatus('Failed to load Google Sign-In. Check internet connection.'); resetSignInBtn(); };
+  s2.onerror = () => { setAuthStatus('Cannot load Google Sign-In — check your connection.'); resetSignInBtn(); };
   document.head.appendChild(s2);
+}
+
+// ── On page load: restore session from stored token ──
+window.addEventListener('load', async () => {
+  const token = getStoredToken();
+  const email = getStoredEmail();
+
+  if(token && email){
+    // We have a valid stored token — skip sign-in entirely
+    setAuthStatus('Loading your wardrobe…');
+    try {
+      // Init gapi so we can make Drive calls
+      await loadGapiOnly();
+      // Set the token on gapi client
+      gapi.client.setToken({ access_token: token });
+      // Set user from stored email
+      currentUser = { email, given_name: email.split('@')[0], picture: '' };
+      hideAuthScreen();
+      renderAuthArea();
+      await loadFromDrive();
+      render();
+    } catch(e){
+      console.warn('Session restore failed:', e.message);
+      // Token may have expired — clear it and show login
+      clearStoredToken();
+      showAuthScreen();
+      setAuthStatus('Session expired — please sign in again.');
+    }
+  } else {
+    // No stored token — show login screen
+    showAuthScreen();
+  }
+});
+
+// Load only gapi (not GIS) — used for session restore
+function loadGapiOnly(){
+  return new Promise((resolve, reject) => {
+    if(gapiInited){ resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://apis.google.com/js/api.js';
+    s.async = true;
+    s.onload = () => {
+      gapi.load('client', async () => {
+        try {
+          await gapi.client.init({ apiKey: CONFIG.API_KEY });
+          gapiInited = true;
+          resolve();
+        } catch(e){ reject(e); }
+      });
+    };
+    s.onerror = () => reject(new Error('Failed to load gapi'));
+    document.head.appendChild(s);
+  });
 }
 
 function signIn(){
   document.getElementById('signin-btn').disabled = true;
   setAuthStatus('Connecting to Google…');
-
-  if(!gapiInited || !gisInited){
-    // Libraries not loaded yet — load them, then sign in
-    loadGoogleLibraries(() => {
-      // Check for previous session first
-      const hint = localStorage.getItem('np_user_hint');
-      if(hint){
-        setAuthStatus('Restoring your session…');
-        try { tokenClient.requestAccessToken({prompt:'none', login_hint: hint}); }
-        catch(e){ doSignIn(); }
-      } else {
-        doSignIn();
-      }
-    });
-    return;
-  }
-
-  doSignIn();
+  loadGoogleLibraries(() => doSignIn());
 }
 
 function doSignIn(){
   setAuthStatus('Opening Google sign-in…');
   try {
-    tokenClient.requestAccessToken({prompt:'select_account'});
+    // prompt:'' means Google decides — if user is already signed in to Google
+    // in this browser it won't show a popup at all
+    tokenClient.requestAccessToken({prompt:''});
   } catch(e){
     console.error('requestAccessToken error:', e);
     setAuthStatus('Sign-in failed: ' + e.message);
@@ -765,7 +823,7 @@ function doSignIn(){
 
 function resetSignInBtn(){
   const btn = document.getElementById('signin-btn');
-  if(btn){ btn.disabled = false; }
+  if(btn) btn.disabled = false;
 }
 
 function signOut(){
@@ -774,60 +832,37 @@ function signOut(){
     if(token) google.accounts.oauth2.revoke(token.access_token, ()=>{});
     gapi.client.setToken(null);
   } catch(e){ console.warn('signOut:', e); }
+  clearStoredToken();
   currentUser = null;
   driveFileId = null;
-  localStorage.removeItem('np_user_hint');
   showAuthScreen();
-}
-
-
-// Decode user info from Google's id_token JWT (no API call needed)
-function decodeGoogleUser(tokenResp){
-  try {
-    // The credential field or id_token in the token response contains a JWT
-    const jwt = tokenResp.id_token || tokenResp.credential;
-    if(!jwt) return null;
-    const payload = JSON.parse(atob(jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
-    return {
-      email:      payload.email || '',
-      given_name: payload.given_name || payload.name?.split(' ')[0] || 'User',
-      picture:    payload.picture || ''
-    };
-  } catch(e){
-    return null;
-  }
 }
 
 async function handleTokenResponse(resp){
   if(resp.error){
     console.warn('Token error:', resp.error, resp.error_description);
-    if(['access_denied','interaction_required','immediate_failed','user_logged_out'].includes(resp.error)){
-      // Silent auth failed — just show the button, no error message
-      setAuthStatus('');
-      resetSignInBtn();
-      return;
-    }
-    setAuthStatus('Sign-in failed: ' + (resp.error_description || resp.error));
+    setAuthStatus(resp.error === 'access_denied' ? '' : 'Sign-in failed: ' + (resp.error_description || resp.error));
     resetSignInBtn();
     return;
   }
 
+  // Store the token so next open skips sign-in
+  const accessToken = resp.access_token;
+  saveToken(accessToken);
+  gapi.client.setToken({ access_token: accessToken });
+
+  // Set user from stored email or a default
+  const email = getStoredEmail() || 'houseofnp75@gmail.com';
+  localStorage.setItem(CONFIG.USER_KEY, email);
+  currentUser = { email, given_name: email.split('@')[0], picture: '' };
+
   setAuthStatus('Signed in — loading your wardrobe…');
-  // No API calls needed — read identity from the token itself
-  // The 'profile email' scope ensures this info is in the token
-  const hint = localStorage.getItem('np_user_hint');
-  currentUser = {
-    email:      hint || 'nilomi@wardrobe',
-    given_name: hint ? hint.split('@')[0] : 'Nilomi',
-    picture:    ''
-  };
-  localStorage.setItem('np_user_hint', currentUser.email);
   hideAuthScreen();
   renderAuthArea();
   try {
     await loadFromDrive();
   } catch(e){
-    console.warn('Drive load error (continuing anyway):', e.message);
+    console.warn('Drive load error:', e.message);
   }
   render();
 }
@@ -858,22 +893,6 @@ function renderAuthArea(){
     <button onclick="signOut()" style="font-size:10px;font-family:'DM Sans',sans-serif;padding:4px 10px;border-radius:14px;border:1.5px solid rgba(245,228,176,.4);background:transparent;color:#F5E4B0;cursor:pointer;white-space:nowrap;">Sign out</button>
   `;
 }
-
-// On page load — try silent restore if previously signed in
-window.addEventListener('load', () => {
-  const hint = localStorage.getItem('np_user_hint');
-  if(hint){
-    setAuthStatus('Restoring your session…');
-    loadGoogleLibraries(() => {
-      try {
-        tokenClient.requestAccessToken({prompt:'none', login_hint: hint});
-      } catch(e){
-        setAuthStatus('');
-        resetSignInBtn();
-      }
-    });
-  }
-});
 
 
 
