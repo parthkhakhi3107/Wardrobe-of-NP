@@ -815,8 +815,10 @@ window.addEventListener('load', async () => {
     try {
       gapi.client.setToken({ access_token: token });
     } catch(e){
-      console.warn('setToken failed:', e.message);
+      console.warn('setToken failed — will use stored token directly:', e.message);
     }
+    // Also store in a module-level var as direct fallback for getToken()
+    // (already stored in localStorage.TOKEN_KEY from sign-in)
     // Always restore the user session — don't clear token just because gapi had trouble
     currentUser = { email, given_name: email.split('@')[0], picture: '' };
     hideAuthScreen();
@@ -987,7 +989,12 @@ function renderAuthArea(){
 // Uses fetch() with bearer token — more reliable than gapi.client for file content
 // ════════════════════════════════════════════
 function getToken(){
-  return gapi.client.getToken()?.access_token || null;
+  // Try gapi first, fall back to localStorage
+  try {
+    const gapiToken = gapi.client.getToken()?.access_token;
+    if(gapiToken) return gapiToken;
+  } catch(e){}
+  return localStorage.getItem(CONFIG.TOKEN_KEY) || null;
 }
 
 async function findDriveFile(){
@@ -999,6 +1006,26 @@ async function findDriveFile(){
   if(!res.ok) throw new Error('Drive list failed: ' + res.status);
   const data = await res.json();
   return data.files?.[0]?.id || null;
+}
+
+// Strip photos from data before caching to localStorage (avoids 5MB limit)
+// Photos always come from Drive on sync
+function stripPhotosForCache(data){
+  if(!data) return data;
+  const d = JSON.parse(JSON.stringify(data)); // deep clone
+  (d.occasions||[]).forEach(occ=>{
+    (occ.events||[]).forEach(ev=>{
+      (ev.looks||[]).forEach(look=>{
+        look.photos = []; // strip outfit photos
+        (look.jewellery||[]).forEach(j=>{ if(j.img) j.img=''; });
+        if(look.shoes?.img) look.shoes.img='';
+      });
+    });
+  });
+  (d.closet||[]).forEach(item=>{
+    item.imgs=[]; item.img='';
+  });
+  return d;
 }
 
 async function loadFromDrive(){
@@ -1038,8 +1065,11 @@ async function loadFromDrive(){
       S.occasions  = data.occasions;
       S.closet     = data.closet    || S.closet;
       S.currentOcc = data.currentOcc || 0;
-      // Update local cache
-      localStorage.setItem('np_data_cache', JSON.stringify(data));
+      // Cache metadata only (no photos) — photos load from Drive on sync
+      try {
+        const cacheData = stripPhotosForCache(data);
+        localStorage.setItem('np_data_cache', JSON.stringify(cacheData));
+      } catch(e){ console.warn('Cache save failed:', e.message); }
       showSaveIndicator('Up to date ✓', true);
       render();
       // Compress in background when browser is idle
@@ -1047,8 +1077,16 @@ async function loadFromDrive(){
       else setTimeout(compressAllExistingPhotos, 2000);
     }
   } catch(e){
-    console.error('Drive load error:', e);
-    showSaveIndicator(cached ? 'Showing cached data' : 'Using local data', true);
+    const msg = e.message || String(e);
+    console.error('Drive load error:', msg);
+    // Show specific error to help diagnose
+    if(msg.includes('401') || msg.includes('403')){
+      showSaveIndicator('Auth expired — save will retry on next change', true);
+    } else if(msg.includes('Failed to fetch') || msg.includes('NetworkError')){
+      showSaveIndicator('No internet — showing cached data', true);
+    } else {
+      showSaveIndicator('Drive sync failed: ' + msg.slice(0,40), true);
+    }
   }
 }
 
@@ -1097,8 +1135,11 @@ async function saveToDrive(){
       }
     );
     if(!uploadRes.ok) throw new Error('Drive save failed: ' + uploadRes.status);
-    // Update local cache so next refresh is instant
-    localStorage.setItem('np_data_cache', payload);
+    // Cache metadata only (no photos) for instant next load
+    try {
+      const cacheData = stripPhotosForCache({occasions:S.occasions,closet:S.closet,currentOcc:S.currentOcc});
+      localStorage.setItem('np_data_cache', JSON.stringify(cacheData));
+    } catch(e){ console.warn('Cache save failed:', e.message); }
     showSaveIndicator('Saved to Drive ✓', true);
   } catch(e){
     console.error('Drive save error:', e);
