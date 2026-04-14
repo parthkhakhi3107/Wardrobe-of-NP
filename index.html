@@ -230,8 +230,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .closet-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-top:10px;}
 @media(max-width:480px){.closet-grid{grid-template-columns:repeat(2,1fr);}}
 .closet-card{border:1px solid var(--bdr);border-radius:10px;overflow:hidden;background:var(--card);}
-.closet-photo{width:100%;aspect-ratio:1;background:var(--sb);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;font-size:32px;opacity:.4;}
-.closet-photo img{width:100%;height:100%;object-fit:cover;opacity:1;}
+.closet-photo{width:100%;aspect-ratio:1;background:var(--sb);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;font-size:32px;}
+.closet-photo img{width:100%;height:100%;object-fit:cover;}
+.closet-photo>.closet-placeholder{opacity:.35;font-size:32px;}
 .closet-info{padding:6px 9px 8px;}
 .closet-name{font-size:11px;font-weight:500;color:var(--text);}
 .closet-sub{font-size:10px;color:var(--muted);}
@@ -613,11 +614,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div><div class="fl">Brand</div><input class="fi" id="ci-brand"/></div>
   </div>
   <div>
-    <div class="fl">Photo</div>
-    <div class="upload-zone"><input type="file" accept="image/*" onchange="handleModalUpload(this,'ci-img-data','ci-prev')"/>📷 Upload</div>
-    <img id="ci-prev" class="upload-preview"/>
-    <input class="fi" id="ci-img-url" placeholder="…or URL" style="margin-top:6px;" oninput="handleModalUrl(this,'ci-img-data','ci-prev')"/>
-    <input type="hidden" id="ci-img-data"/>
+    <div class="fl">Photos <span style="font-weight:400;opacity:.7;">(upload multiple)</span></div>
+    <div class="upload-zone">
+      <input type="file" accept="image/*" multiple onchange="handleClosetPhotos(this)"/>
+      📷 Upload photos (tap to select multiple)
+    </div>
+    <div id="ci-photos-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;"></div>
+    <input class="fi" id="ci-img-url" placeholder="…or paste image URL" style="margin-top:6px;" oninput="handleClosetUrlAdd(this)"/>
   </div>
   <div><div class="fl">Notes</div><textarea class="fi" id="ci-notes" rows="2"></textarea></div>
 </div>
@@ -2023,11 +2026,24 @@ function renderCloset(){
   list.forEach(item=>{
     const card=document.createElement('div'); card.className='closet-card';
     card.style.cursor='default';
+    const imgs = item.imgs && item.imgs.length ? item.imgs : (item.img ? [item.img] : []);
+    const ccid = `ci-${item.id}`;
+    let photoHTML = '';
+    if(imgs.length > 1){
+      photoHTML = `<div class="photo-swiper" data-cid="${ccid}" style="aspect-ratio:1;">
+        <div class="swiper-track">${imgs.map(p=>`<div class="swiper-slide"><img src="${p}" alt=""/></div>`).join('')}</div>
+        <div class="swiper-dots">${imgs.map((_,i)=>`<div class="swiper-dot${i===0?' active':''}"></div>`).join('')}</div>
+        <button class="swiper-prev" onclick="swiperPrev('${ccid}')">‹</button>
+        <button class="swiper-next" onclick="swiperNext('${ccid}')">›</button>
+        <div class="ct-badge ct-${item.type}" style="z-index:3;">${item.type}</div>
+      </div>`;
+    } else if(imgs.length === 1){
+      photoHTML = `<div class="closet-photo"><img src="${imgs[0]}"/><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
+    } else {
+      photoHTML = `<div class="closet-photo"><span class="closet-placeholder">${icons[item.type]}</span><div class="ct-badge ct-${item.type}">${item.type}</div></div>`;
+    }
     card.innerHTML=`
-      <div class="closet-photo">
-        ${item.img?`<img src="${item.img}"/>`:`<span>${icons[item.type]}</span>`}
-        <div class="ct-badge ct-${item.type}">${item.type}</div>
-      </div>
+      ${photoHTML}
       <div class="closet-info">
         <div class="closet-name">${item.name}</div>
         <div class="closet-sub">${item.brand||''}</div>
@@ -2067,33 +2083,39 @@ function setClosetFilter(f,btn){
   renderCloset();
 }
 
+// Temp storage for closet item photos being added/edited
+let ciPhotos = [];
+
 function openAddClosetItem(type){
-  editingClosetId=null;
-  closetItemType=type;
+  editingClosetId=null; closetItemType=type; ciPhotos=[];
   document.getElementById('ci-ttl').textContent=`Add ${type.charAt(0).toUpperCase()+type.slice(1)} to Closet`;
   ['ci-name','ci-brand','ci-notes','ci-img-url'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('ci-img-data').value='';
-  const p=document.getElementById('ci-prev');p.style.display='none';p.src='';
+  document.getElementById('ci-photos-preview').innerHTML='';
   openModal('closet-item-modal');
 }
 
 function editClosetItem(itemId){
   const item=S.closet.find(i=>i.id===itemId); if(!item) return;
   editingClosetId=itemId; closetItemType=item.type;
+  // Migrate legacy single img to imgs array
+  ciPhotos = item.imgs ? [...item.imgs] : (item.img ? [item.img] : []);
   document.getElementById('ci-ttl').textContent=`Edit ${item.type.charAt(0).toUpperCase()+item.type.slice(1)}`;
   document.getElementById('ci-name').value=item.name||'';
   document.getElementById('ci-brand').value=item.brand||'';
   document.getElementById('ci-notes').value=item.notes||'';
-  document.getElementById('ci-img-url').value=(item.img&&!item.img.startsWith('data:'))?item.img:'';
-  document.getElementById('ci-img-data').value=item.img||'';
-  const p=document.getElementById('ci-prev');
-  if(item.img){p.src=item.img;p.style.display='block';}else{p.style.display='none';p.src='';}
+  document.getElementById('ci-img-url').value='';
+  renderCiPhotosPreview();
   openModal('closet-item-modal');
 }
 
 function saveClosetItem(){
   const name=document.getElementById('ci-name').value.trim(); if(!name){alert('Enter name');return;}
-  const data={name,brand:document.getElementById('ci-brand').value.trim(),img:document.getElementById('ci-img-data').value||'',notes:document.getElementById('ci-notes').value.trim()};
+  const data={
+    name, brand:document.getElementById('ci-brand').value.trim(),
+    notes:document.getElementById('ci-notes').value.trim(),
+    imgs:[...ciPhotos],
+    img:ciPhotos[0]||'' // keep legacy img field for backward compat
+  };
   if(editingClosetId){
     const idx=S.closet.findIndex(i=>i.id===editingClosetId);
     if(idx>-1) S.closet[idx]={...S.closet[idx],...data};
@@ -2101,7 +2123,46 @@ function saveClosetItem(){
   } else {
     S.closet.push({id:Date.now(),type:closetItemType,...data});
   }
+  ciPhotos=[];
   closeModals(); renderCloset(); autoSave();
+}
+
+function handleClosetPhotos(input){
+  const files=Array.from(input.files); if(!files.length) return;
+  let loaded=0;
+  files.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      ciPhotos.push(e.target.result);
+      loaded++;
+      if(loaded===files.length) renderCiPhotosPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value=''; // allow re-selecting same file
+}
+
+function handleClosetUrlAdd(input){
+  const url=input.value.trim(); if(!url) return;
+  if(ciPhotos.includes(url)) return;
+  ciPhotos.push(url);
+  input.value='';
+  renderCiPhotosPreview();
+}
+
+function renderCiPhotosPreview(){
+  const preview=document.getElementById('ci-photos-preview');
+  if(!preview) return;
+  preview.innerHTML=ciPhotos.map((p,i)=>`
+    <div style="position:relative;width:64px;height:64px;flex-shrink:0;">
+      <img src="${p}" style="width:64px;height:64px;object-fit:cover;border-radius:7px;border:1px solid var(--bdr);display:block;"/>
+      <button onclick="removeCiPhoto(${i})" style="position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;background:var(--maroon);color:#F5E4B0;border:none;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
+    </div>`).join('');
+}
+
+function removeCiPhoto(idx){
+  ciPhotos.splice(idx,1);
+  renderCiPhotosPreview();
 }
 
 // ── ADD TO PLANNER from Closet ──
