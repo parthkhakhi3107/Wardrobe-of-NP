@@ -1497,7 +1497,7 @@ async function uploadCardPhoto(input,evId,lid){
     look.photos.push(src);
     if(i === 0 && look.photos.length === 1) extractPaletteForLook(src, evId, lid);
   });
-  if(compressed.length > 0) renderOccasionDebounced(100);
+  if(compressed.length > 0){ renderOccasionDebounced(100); autoSave(); }
   showSaveIndicator('Photos added ✓', true);
 }
 function extractPaletteForLook(src,evId,lid){
@@ -1674,7 +1674,7 @@ function renderSidebar(){
     d.addEventListener('drop',e=>{
       e.preventDefault();d.classList.remove('occ-item-over');
       const from=parseInt(e.dataTransfer.getData('oidx')),to=i; if(from===to) return;
-      S.occasions.splice(to,0,S.occasions.splice(from,1)[0]); renderSidebar();
+      S.occasions.splice(to,0,S.occasions.splice(from,1)[0]); renderSidebar(); autoSave();
     });
     el.appendChild(d);
   });
@@ -1766,7 +1766,7 @@ function renderOccasion(){
     card.addEventListener('drop',e=>{
       e.preventDefault();card.classList.remove('ev-drag-over');
       if(evDragSrc===null||evDragSrc===evIdx) return;
-      o.events.splice(evIdx,0,o.events.splice(evDragSrc,1)[0]); evDragSrc=null; renderOccasion();
+      o.events.splice(evIdx,0,o.events.splice(evDragSrc,1)[0]); evDragSrc=null; renderOccasion(); autoSave();
     });
     c.appendChild(card);
   });
@@ -2016,7 +2016,7 @@ function moveLook(srcEid,lid,tEid,beforeLid){
   const[moved]=srcEv.looks.splice(idx,1);
   if(beforeLid!=null){const ti=tEv.looks.findIndex(l=>l.id===beforeLid);tEv.looks.splice(ti,0,moved);}
   else tEv.looks.push(moved);
-  renderOccasion();
+  renderOccasion(); autoSave();
 }
 
 // ══ ADD/EDIT LOOK ══
@@ -2195,7 +2195,7 @@ function saveLook(){
   } else {
     look.id=Date.now();look.comments=[];ev.looks.push(look);
   }
-  closeModals(); renderOccasion();
+  closeModals(); renderOccasion(); autoSave();
 }
 
 // ══ COMBOS ══
@@ -2226,7 +2226,7 @@ function saveCombo(){
   const o=getOcc();o.combos=o.combos||[];
   const ei=o.combos.findIndex(c=>c.lookId===lid);
   if(ei>-1) o.combos[ei].name=name; else o.combos.push({id:Date.now(),name,lookId:lid});
-  closeModals(); render();
+  closeModals(); render(); autoSave();
 }
 function showComboDetail(cb){
   const o=getOcc();let look=null;
@@ -2568,7 +2568,7 @@ function addOutfitFromClosetToEvent(occId,evId,item){
   });
   document.getElementById('add-to-planner-modal').classList.remove('vis');
   S.currentOcc=occId; ev.open=true;
-  showTab('planner'); render();
+  showTab('planner'); render(); autoSave();
   setTimeout(()=>alert(`"${item.name}" added to ${ev.name}!\nOpen Edit on the look to add jewellery, shoes and details.`),300);
 }
 
@@ -2583,7 +2583,7 @@ function addAccFromClosetToLook(occId,evId,lookId,item){
   document.getElementById('add-to-planner-modal').classList.remove('vis');
   S.currentOcc=occId;
   S.occasions.find(o=>o.id===occId)?.events.find(e=>e.id===evId) && (S.occasions.find(o=>o.id===occId).events.find(e=>e.id===evId).open=true);
-  showTab('planner'); render();
+  showTab('planner'); render(); autoSave();
   setTimeout(()=>alert(`"${item.name}" added to ${look.name}!`),300);
 }
 
@@ -2600,7 +2600,7 @@ function saveEvent(){
   const d=document.getElementById('ev-date').value;
   const fmt=d?new Date(d).toLocaleDateString('en-IN',{month:'short',day:'numeric'}):'';
   getOcc().events.push({id:Date.now(),name:n,date:fmt,color:evColor,open:true,looks:[]});
-  closeModals(); render();
+  closeModals(); render(); autoSave();
 }
 
 // ══ OCCASION ══
