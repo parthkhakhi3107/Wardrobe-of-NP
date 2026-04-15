@@ -328,6 +328,33 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .section-title{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:rgba(201,153,42,.25);border-radius:2px;}
+
+/* ── MOBILE OCCASION BAR ── */
+.occ-mobile-bar{display:none;overflow-x:auto;-webkit-overflow-scrolling:touch;gap:6px;padding:4px 0 6px;white-space:nowrap;scrollbar-width:none;}
+.occ-mobile-bar::-webkit-scrollbar{display:none;}
+@media(max-width:640px){.occ-mobile-bar{display:flex;}}
+.occ-pill{flex-shrink:0;padding:6px 14px;border-radius:20px;border:1.5px solid var(--bdr2);font-size:12px;font-weight:500;background:var(--card);color:var(--text);cursor:pointer;white-space:nowrap;font-family:'DM Sans',sans-serif;}
+.occ-pill.active{background:var(--maroon);color:#F5E4B0;border-color:var(--maroon);}
+.occ-pill.new-pill{border-style:dashed;color:var(--gold-d);}
+
+/* ── PACKING CHECKLIST ── */
+.pack-modal-body{max-height:70vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:14px;}
+.pack-event-group{background:var(--sb);border-radius:10px;overflow:hidden;border:1px solid var(--bdr);}
+.pack-event-hd{padding:8px 12px;background:var(--maroon-l);border-bottom:1px solid var(--bdr);font-size:12px;font-weight:500;color:var(--maroon);}
+.pack-look-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--bdr);}
+.pack-look-row:last-child{border-bottom:none;}
+.pack-look-photo{width:42px;height:52px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--card);border:1px solid var(--bdr);display:flex;align-items:center;justify-content:center;font-size:18px;}
+.pack-look-photo img{width:100%;height:100%;object-fit:cover;}
+.pack-look-info{flex:1;min-width:0;}
+.pack-look-name{font-size:12px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pack-look-items{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;}
+.pack-item{display:flex;align-items:center;gap:4px;padding:3px 7px 3px 4px;border-radius:14px;border:1px solid var(--bdr);background:var(--card);font-size:10px;color:var(--muted);cursor:pointer;transition:all .15s;}
+.pack-item.packed{background:rgba(74,158,101,.12);border-color:rgba(74,158,101,.4);color:#2A7A45;}
+.pack-item-photo{width:18px;height:18px;border-radius:3px;overflow:hidden;flex-shrink:0;background:var(--sb);display:flex;align-items:center;justify-content:center;font-size:10px;}
+.pack-item-photo img{width:100%;height:100%;object-fit:cover;}
+.pack-check{width:14px;height:14px;margin-left:auto;flex-shrink:0;cursor:pointer;accent-color:var(--maroon);}
+.pack-filter-row{display:flex;gap:6px;padding:10px 14px 0;flex-wrap:wrap;}
+.pack-summary{font-size:11px;color:var(--muted);padding:6px 14px;border-top:1px solid var(--bdr);text-align:right;}
 </style>
 
 </head>
@@ -368,6 +395,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <button class="add-occ-btn" onclick="openModal('new-occ-modal')">+ New Occasion</button>
   </div>
   <div class="content">
+    <!-- Mobile occasion switcher — hidden on desktop, shown on mobile -->
+    <div class="occ-mobile-bar" id="occ-mobile-bar"></div>
     <!-- Editable Occasion Header -->
     <div class="occ-header">
       <div class="occ-header-top">
@@ -383,6 +412,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
           </div>
           <button class="btn-outline" id="edit-occ-btn" onclick="toggleEditOcc()">✏ Edit</button>
           <button class="btn-outline" onclick="showUnsorted()">⚠ Issues</button>
+          <button class="btn-outline" onclick="openPackingList()">📦 Pack</button>
           <button class="btn-outline" onclick="openModal('pdf-modal')">🖨 PDF</button>
         </div>
       </div>
@@ -523,6 +553,35 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div style="margin-top:10px;"><div class="fl">Notes</div><textarea class="fi" id="out-desc" rows="2" placeholder="Blouse details, who gifted it, tailoring notes…"></textarea></div>
   </div>
 
+  <!-- PAIRED OUTFIT / LAYER (dupatta, jacket, shrug, stole…) -->
+  <div style="padding-bottom:14px;border-bottom:1px solid var(--bdr);">
+    <div class="modal-section" style="margin-bottom:10px;">
+      <span>👘 Paired Outfit / Layer</span>
+      <div style="display:flex;gap:6px;">
+        <button style="font-size:11px;font-family:'DM Sans',sans-serif;padding:4px 10px;border-radius:7px;border:1px solid var(--bdr2);background:transparent;color:var(--gold-d);cursor:pointer;" onclick="openClosetPicker('pairedOutfit')">+ From Closet</button>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:8px;">A second piece worn together — dupatta, jacket, stole, shrug, blouse layer…</div>
+    <!-- Selected paired outfit from closet -->
+    <div id="pair-closet-selected" class="sel-acc-list" style="margin-bottom:8px;"></div>
+    <!-- Manual paired outfit fields -->
+    <div id="pair-manual">
+      <div class="g2">
+        <div><div class="fl">Name</div><input class="fi" id="pair-name" placeholder="Gold Dupatta, Ivory Jacket…"/></div>
+        <div><div class="fl">Brand / Designer</div><input class="fi" id="pair-brand" placeholder="Sabyasachi…"/></div>
+      </div>
+      <div style="margin-top:8px;">
+        <div class="fl">Photo</div>
+        <div class="upload-zone">
+          <input type="file" accept="image/*" onchange="handleModalUpload(this,'pair-img-data','pair-prev')"/>📷 Upload
+        </div>
+        <img id="pair-prev" class="upload-preview"/>
+        <input class="fi" id="pair-img-url" placeholder="…or URL" style="margin-top:6px;" oninput="handleModalUrl(this,'pair-img-data','pair-prev')"/>
+        <input type="hidden" id="pair-img-data"/>
+      </div>
+    </div>
+  </div>
+
   <!-- JEWELLERY — from closet or manual -->
   <div style="padding-bottom:14px;border-bottom:1px solid var(--bdr);">
     <div class="modal-section" style="margin-bottom:10px;">
@@ -595,6 +654,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div id="combo-preview-wrap"></div>
 </div>
 <div class="modal-ft"><button class="btn-sec" onclick="closeModals()">Cancel</button><button class="btn-primary" onclick="saveCombo()">Save</button></div>
+</div></div>
+
+<!-- PACKING CHECKLIST -->
+<div class="modal-overlay" id="packing-modal">
+<div class="modal modal-lg" style="max-width:520px;">
+<div class="modal-hd">
+  <div class="modal-ttl">📦 Packing List</div>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <button onclick="printPackingList()" style="font-size:11px;font-family:'DM Sans',sans-serif;padding:4px 10px;border-radius:7px;border:1px solid var(--bdr2);background:transparent;color:var(--gold-d);cursor:pointer;">🖨 Print</button>
+    <button class="modal-x" onclick="closeModals()">✕</button>
+  </div>
+</div>
+<div class="pack-filter-row">
+  <button class="occ-pill active" id="pack-f-btn" onclick="setPackFilter('f',this)">🌸 Nilomi</button>
+  <button class="occ-pill" id="pack-m-btn" onclick="setPackFilter('m',this)">👔 Parth</button>
+  <button class="occ-pill" id="pack-all-btn" onclick="setPackFilter('all',this)">👤 Both</button>
+</div>
+<div class="pack-modal-body" id="pack-body"></div>
+<div class="pack-summary" id="pack-summary"></div>
 </div></div>
 
 <!-- COPY LOOK -->
@@ -1374,7 +1452,7 @@ let closetItemGender='f'; // gender being added to closet
 let closetGenderFilter='all'; // 'all','f','m'
 let evDragSrc=null, dragSrcLookId=null, dragSrcEvId=null;
 let cpickerType='jewellery', cpickerSelected=[];
-let jwlFromCloset=[], shoeFromCloset=null, outfitFromCloset=null;
+let jwlFromCloset=[], shoeFromCloset=null, outfitFromCloset=null, pairedOutfitFromCloset=null;
 let editingClosetId=null;
 let atpClosetItemId=null;
 const swiperState={};
@@ -1538,16 +1616,17 @@ function extractPalette(src){
 // ══ CLOSET PICKER in look modal ══
 function openClosetPicker(type){
   cpickerType=type; cpickerSelected=[];
-  const titles={outfit:'Pick Outfit from Closet',jewellery:'Pick Jewellery from Closet',shoes:'Pick Shoes from Closet'};
+  const titles={outfit:'Pick Outfit from Closet',jewellery:'Pick Jewellery from Closet',shoes:'Pick Shoes from Closet',pairedOutfit:'Pick Paired Outfit / Layer'};
   document.getElementById('cpicker-ttl').textContent=titles[type]||'Pick from Closet';
   const grid=document.getElementById('cpicker-grid'); grid.innerHTML='';
-  const icons={outfit:'👗',jewellery:'💍',shoes:'👠'};
-  S.closet.filter(i=>i.type===type).forEach(item=>{
+  const icons={outfit:'👗',jewellery:'💍',shoes:'👠',pairedOutfit:'👘'};
+  const filterType=type==='pairedOutfit'?'outfit':type; // paired outfit pulls from outfit closet
+  S.closet.filter(i=>i.type===filterType).forEach(item=>{
     const card=document.createElement('div');
     card.className='cp-item'; card.dataset.id=item.id;
     card.innerHTML=`<div class="cp-item-photo">${item.img?`<img src="${item.img}"/>`:`<span>${icons[type]}</span>`}</div><div class="cp-item-name">${item.name}</div>`;
     card.onclick=()=>{
-      if(type==='shoes'||type==='outfit'){
+      if(type==='shoes'||type==='outfit'||type==='pairedOutfit'){
         document.querySelectorAll('#cpicker-grid .cp-item').forEach(c=>c.classList.remove('sel'));
         card.classList.toggle('sel');
         cpickerSelected=card.classList.contains('sel')?[item.id]:[];
@@ -1558,8 +1637,8 @@ function openClosetPicker(type){
     };
     grid.appendChild(card);
   });
-  if(!S.closet.filter(i=>i.type===type).length){
-    grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:20px;font-size:12px;color:var(--muted);">No ${type} in closet yet.<br/>Add some in the Closet tab first.</div>`;
+  if(!S.closet.filter(i=>i.type===filterType).length){
+    grid.innerHTML=`<div style="grid-column:1/-1;text-align:center;padding:20px;font-size:12px;color:var(--muted);">No ${filterType} in closet yet.<br/>Add some in the Closet tab first.</div>`;
   }
   document.getElementById('closet-picker-modal').classList.add('vis');
 }
@@ -1570,6 +1649,9 @@ function confirmClosetPick(){
     if(cpickerType==='outfit'){
       outfitFromCloset=item;
       renderOutfitClosetSelected();
+    } else if(cpickerType==='pairedOutfit'){
+      pairedOutfitFromCloset=item;
+      renderPairedOutfitSelected();
     } else if(cpickerType==='jewellery'){
       jwlFromCloset.push(item);
       renderJwlClosetSelected();
@@ -1580,6 +1662,17 @@ function confirmClosetPick(){
   });
   closeClosetPicker();
 }
+function renderPairedOutfitSelected(){
+  const wrap=document.getElementById('pair-closet-selected'); if(!wrap) return;
+  wrap.innerHTML='';
+  const manualFields=document.getElementById('pair-manual');
+  if(!pairedOutfitFromCloset){if(manualFields)manualFields.style.display='';return;}
+  if(manualFields)manualFields.style.display='none';
+  const div=document.createElement('div'); div.className='sel-acc-card'; div.style.cssText='width:80px;';
+  div.innerHTML=`<div class="sel-acc-photo">${pairedOutfitFromCloset.img?`<img src="${pairedOutfitFromCloset.img}"/>`:'👘'}</div><div class="sel-acc-name">${pairedOutfitFromCloset.name}</div><button class="sel-acc-rm" onclick="removePairedOutfitCloset()">✕</button>`;
+  wrap.appendChild(div);
+}
+function removePairedOutfitCloset(){pairedOutfitFromCloset=null;renderPairedOutfitSelected();}
 function renderOutfitClosetSelected(){
   const wrap=document.getElementById('outfit-closet-selected'); wrap.innerHTML='';
   const manualFields=document.getElementById('outfit-manual-fields');
@@ -1650,6 +1743,16 @@ function updateSwiper(cid){
 // ══ RENDER ══
 function render(){renderSidebar();renderOccasion();}
 
+function renderMobileOccBar(){
+  const bar=document.getElementById('occ-mobile-bar'); if(!bar) return;
+  bar.innerHTML=S.occasions.map(o=>
+    `<button class="occ-pill${o.id===S.currentOcc?' active':''}" onclick="S.currentOcc=${o.id};render();">${o.name}</button>`
+  ).join('')+`<button class="occ-pill new-pill" onclick="openModal('new-occ-modal')">+ New</button>`;
+  // Scroll active pill into view
+  const active=bar.querySelector('.occ-pill.active');
+  if(active) setTimeout(()=>active.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}),50);
+}
+
 function renderSidebar(){
   const el=document.getElementById('occ-list'); el.innerHTML='';
   S.occasions.forEach((o,i)=>{
@@ -1678,6 +1781,7 @@ function renderSidebar(){
     });
     el.appendChild(d);
   });
+  renderMobileOccBar();
 }
 
 // Editable occasion header
@@ -1867,6 +1971,8 @@ function renderLookCards(ev,looks){
     }).join('');
     const hasShoe=look.shoes?.type==='closet'?!!(S.closet.find(i=>i.id===look.shoes?.closetId)?.img):!!look.shoes?.img;
     const shoeHTML=look.shoes?.name?`<div class="acc-thumb" title="${look.shoes.name}">${hasShoe?`<img class="deferred-acc" data-eid="${ev.id}" data-lid="${look.id}" data-atype="s" alt=""/>`:footIcon}</div>`:'';
+    const hasPair=look.pairedOutfit?.type==='closet'?!!(S.closet.find(i=>i.id===look.pairedOutfit?.closetId)?.img):!!look.pairedOutfit?.img;
+    const pairHTML=look.pairedOutfit?.name?`<div class="acc-thumb" title="Layer: ${look.pairedOutfit.name}">${hasPair?`<img class="deferred-acc" data-eid="${ev.id}" data-lid="${look.id}" data-atype="p" alt=""/>`:'👘'}</div>`:'';
     const checkHTML=(look.checklist||[]).slice(0,2).map((c,ci)=>`<div class="check-item ${c.done?'done':'check-pending'}"><input type="checkbox" ${c.done?'checked':''} onchange="toggleCheck(event,${ev.id},${look.id},${ci})"/>${c.text}</div>`).join('');
     const lastC=look.comments?.slice(-1)[0];
     return `
@@ -1879,7 +1985,7 @@ function renderLookCards(ev,looks){
       </div>
       ${paletteHTML}
       <div class="acc-row">
-        ${jwlHTML}${shoeHTML}
+        ${pairHTML}${jwlHTML}${shoeHTML}
         <div class="pending-badge" style="margin-left:auto;font-size:9px;color:var(--maroon-m);align-self:center;">${pending?`⚠ ${pending}`:''}</div>
       </div>
       <div class="look-info">
@@ -1928,6 +2034,8 @@ function fillDeferredImages(container){
     if(img.dataset.atype==='j'){
       const j=(look.jewellery||[])[parseInt(img.dataset.aidx||0)];
       src=j?.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j?.img||'';
+    } else if(img.dataset.atype==='p'){
+      src=look.pairedOutfit?.type==='closet'?S.closet.find(i=>i.id===look.pairedOutfit.closetId)?.img||'':look.pairedOutfit?.img||'';
     } else {
       src=look.shoes?.type==='closet'?S.closet.find(i=>i.id===look.shoes.closetId)?.img||'':look.shoes?.img||'';
     }
@@ -2030,7 +2138,7 @@ function toggleOutC(el){
 }
 
 function clearLookModal(){
-  outColors=[]; outPhotos=[]; jwlFromCloset=[]; shoeFromCloset=null; outfitFromCloset=null;
+  outColors=[]; outPhotos=[]; jwlFromCloset=[]; shoeFromCloset=null; outfitFromCloset=null; pairedOutfitFromCloset=null;
   ['out-name','out-designer','out-desc','shoe-name','shoe-brand','shoe-img-url'].forEach(id=>document.getElementById(id).value='');
   ['shoe-img-data'].forEach(id=>document.getElementById(id).value='');
   ['shoe-prev'].forEach(id=>{const el=document.getElementById(id);el.style.display='none';el.src='';});
@@ -2094,6 +2202,15 @@ function openEditLook(evId,lid){
     document.getElementById('shoe-name').value=look.shoes?.name||'';
     document.getElementById('shoe-brand').value=look.shoes?.brand||'';
     if(look.shoes?.img){document.getElementById('shoe-img-data').value=look.shoes.img;const p=document.getElementById('shoe-prev');p.src=look.shoes.img;p.style.display='block';}
+  }
+  // paired outfit
+  if(look.pairedOutfit?.type==='closet'){
+    pairedOutfitFromCloset=S.closet.find(i=>i.id===look.pairedOutfit.closetId)||null;
+    renderPairedOutfitSelected();
+  } else if(look.pairedOutfit?.name){
+    document.getElementById('pair-name').value=look.pairedOutfit.name||'';
+    document.getElementById('pair-brand').value=look.pairedOutfit.brand||'';
+    if(look.pairedOutfit.img){document.getElementById('pair-img-data').value=look.pairedOutfit.img;const p=document.getElementById('pair-prev');p.src=look.pairedOutfit.img;p.style.display='block';}
   }
   // jewellery
   (look.jewellery||[]).forEach(j=>{
@@ -2176,6 +2293,14 @@ function saveLook(){
   } else {
     shoes={type:'manual',name:document.getElementById('shoe-name').value.trim(),brand:document.getElementById('shoe-brand').value.trim(),img:document.getElementById('shoe-img-data').value||''};
   }
+  // paired outfit / layer: closet or manual
+  let pairedOutfit=null;
+  if(pairedOutfitFromCloset){
+    pairedOutfit={type:'closet',closetId:pairedOutfitFromCloset.id,name:pairedOutfitFromCloset.name,brand:pairedOutfitFromCloset.brand,img:pairedOutfitFromCloset.img||''};
+  } else {
+    const pn=document.getElementById('pair-name').value.trim();
+    if(pn) pairedOutfit={type:'manual',name:pn,brand:document.getElementById('pair-brand').value.trim(),img:document.getElementById('pair-img-data').value||''};
+  }
   const checklist=[...document.querySelectorAll('.check-edit-row')].map(row=>({
     text:row.querySelector('.check-edit-inp').value.trim(),done:row.querySelector('input[type=checkbox]').checked
   })).filter(c=>c.text);
@@ -2186,7 +2311,7 @@ function saveLook(){
     photos:outfitPhotos, palette, colors:[...outColors],
     status:document.getElementById('out-status').value,
     desc:document.getElementById('out-desc').value.trim(),
-    outfitClosetRef, jewellery, shoes, checklist
+    outfitClosetRef, pairedOutfit, jewellery, shoes, checklist
   };
   const ev=getOcc().events.find(e=>e.id===addingToEvId);
   if(editLookRef){
@@ -2620,6 +2745,137 @@ function renderHistory(){
     d.onclick=()=>{S.currentOcc=o.id;showTab('planner');};
     el.appendChild(d);
   });
+}
+
+// ══ PACKING CHECKLIST ══
+let packFilter='f';
+function setPackFilter(f,btn){
+  packFilter=f;
+  document.querySelectorAll('.pack-filter-row .occ-pill').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderPackingList();
+}
+function openPackingList(){
+  packFilter=S.currentGender||'f';
+  // sync active button
+  document.querySelectorAll('.pack-filter-row .occ-pill').forEach(b=>b.classList.remove('active'));
+  const btn=packFilter==='f'?document.getElementById('pack-f-btn'):packFilter==='m'?document.getElementById('pack-m-btn'):document.getElementById('pack-all-btn');
+  if(btn) btn.classList.add('active');
+  renderPackingList();
+  openModal('packing-modal');
+}
+function getItemImg(look,type,idx){
+  if(type==='outfit'){
+    if(look.outfitClosetRef?.type==='closet') return S.closet.find(i=>i.id===look.outfitClosetRef.closetId)?.img||look.photos?.[0]||'';
+    return look.photos?.[0]||'';
+  }
+  if(type==='paired'){
+    if(look.pairedOutfit?.type==='closet') return S.closet.find(i=>i.id===look.pairedOutfit.closetId)?.img||'';
+    return look.pairedOutfit?.img||'';
+  }
+  if(type==='jwl'){
+    const j=(look.jewellery||[])[idx];
+    return j?.type==='closet'?S.closet.find(i=>i.id===j.closetId)?.img||'':j?.img||'';
+  }
+  if(type==='shoe'){
+    if(look.shoes?.type==='closet') return S.closet.find(i=>i.id===look.shoes.closetId)?.img||'';
+    return look.shoes?.img||'';
+  }
+  return '';
+}
+function renderPackingList(){
+  const body=document.getElementById('pack-body'); if(!body) return;
+  const o=getOcc(); if(!o){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px;">No occasion selected.</div>';return;}
+  body.innerHTML='';
+  let totalItems=0, packedItems=0;
+  // Init packing state for this occasion if not present
+  o.packingState=o.packingState||{};
+
+  o.events.forEach(ev=>{
+    const looks=(ev.looks||[]).filter(l=>packFilter==='all'||l.gender===packFilter);
+    if(!looks.length) return;
+    const group=document.createElement('div'); group.className='pack-event-group';
+    group.innerHTML=`<div class="pack-event-hd" style="border-left:3px solid ${ev.color||'var(--maroon)'};">${ev.name} <span style="font-weight:400;opacity:.7;font-size:10px;">· ${ev.date||''}</span></div>`;
+    looks.forEach(look=>{
+      const lookRow=document.createElement('div'); lookRow.className='pack-look-row';
+      const firstImg=getItemImg(look,'outfit',0);
+      const gIcon=look.gender==='m'?'👔':'👗';
+      lookRow.innerHTML=`<div class="pack-look-photo">${firstImg?`<img src="${firstImg}"/>`:`<span>${gIcon}</span>`}</div><div class="pack-look-info"><div class="pack-look-name">${look.name}</div><div class="pack-look-items" id="pack-items-${look.id}"></div></div>`;
+      group.appendChild(lookRow);
+      const itemsEl=lookRow.querySelector(`#pack-items-${look.id}`);
+
+      // Build item list: paired outfit, jewellery, shoes
+      const items=[];
+      if(look.pairedOutfit?.name) items.push({key:`p`,label:look.pairedOutfit.name,img:getItemImg(look,'paired',0),icon:'👘'});
+      (look.jewellery||[]).forEach((j,ji)=>{ if(j.name) items.push({key:`j${ji}`,label:j.name,img:getItemImg(look,'jwl',ji),icon:'💍'}); });
+      if(look.shoes?.name) items.push({key:'s',label:look.shoes.name,img:getItemImg(look,'shoe',0),icon:'👠'});
+      if(!items.length){ itemsEl.innerHTML=`<span style="font-size:10px;color:var(--muted);">No accessories listed</span>`; return; }
+
+      items.forEach(it=>{
+        const stateKey=`${look.id}-${it.key}`;
+        const packed=!!(o.packingState[stateKey]);
+        totalItems++; if(packed) packedItems++;
+        const chip=document.createElement('div'); chip.className='pack-item'+(packed?' packed':'');
+        chip.innerHTML=`<div class="pack-item-photo">${it.img?`<img src="${it.img}"/>`:`<span>${it.icon}</span>`}</div><span>${it.label}</span>`;
+        chip.onclick=()=>{
+          o.packingState[stateKey]=!o.packingState[stateKey];
+          chip.classList.toggle('packed',o.packingState[stateKey]);
+          updatePackSummary();
+          autoSave();
+        };
+        itemsEl.appendChild(chip);
+      });
+    });
+    body.appendChild(group);
+  });
+  if(!body.children.length){
+    body.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:12px;">No looks yet for this occasion.<br/>Add looks in the Planner tab first.</div>`;
+  }
+  function updatePackSummary(){
+    let t=0,p=0;
+    o.events.forEach(ev=>(ev.looks||[]).filter(l=>packFilter==='all'||l.gender===packFilter).forEach(look=>{
+      const its=[];
+      if(look.pairedOutfit?.name)its.push(`p`);
+      (look.jewellery||[]).forEach((j,ji)=>{if(j.name)its.push(`j${ji}`);});
+      if(look.shoes?.name)its.push('s');
+      its.forEach(k=>{t++;if(o.packingState[`${look.id}-${k}`])p++;});
+    }));
+    const s=document.getElementById('pack-summary');
+    if(s) s.textContent=t?`${p} of ${t} items packed`:'';
+  }
+  const s=document.getElementById('pack-summary');
+  if(s) s.textContent=totalItems?`${packedItems} of ${totalItems} items packed`:'';
+}
+function printPackingList(){
+  const o=getOcc(); if(!o) return;
+  let html=`<html><head><title>Packing List — ${o.name}</title><style>
+    body{font-family:sans-serif;padding:20px;color:#1C1410;}
+    h1{font-size:18px;margin-bottom:4px;}h2{font-size:13px;color:#7B1F2E;margin:14px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;}
+    .look{display:flex;gap:10px;align-items:flex-start;margin:8px 0;padding:6px;border:1px solid #eee;border-radius:6px;}
+    .look img{width:40px;height:52px;object-fit:cover;border-radius:4px;}
+    .look-ph{width:40px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;background:#f5f5f5;border-radius:4px;}
+    .items{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;}
+    .item{display:flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid #ddd;border-radius:12px;font-size:11px;}
+    .item img{width:16px;height:16px;object-fit:cover;border-radius:2px;}
+    .cb{width:14px;height:14px;border:1.5px solid #aaa;border-radius:3px;display:inline-block;flex-shrink:0;}
+    @media print{body{padding:10px;}}
+  </style></head><body>`;
+  html+=`<h1>📦 Packing List — ${o.name}</h1><p style="font-size:11px;color:#666;">${o.dates} · ${o.venue}</p>`;
+  o.events.forEach(ev=>{
+    const looks=(ev.looks||[]).filter(l=>packFilter==='all'||l.gender===packFilter);
+    if(!looks.length) return;
+    html+=`<h2>${ev.name}${ev.date?` · ${ev.date}`:''}</h2>`;
+    looks.forEach(look=>{
+      const img=getItemImg(look,'outfit',0);
+      html+=`<div class="look">${img?`<img src="${img}"/>`:`<div class="look-ph">${look.gender==='m'?'👔':'👗'}</div>`}<div style="flex:1;"><div style="font-size:13px;font-weight:500;">${look.name}</div><div style="font-size:10px;color:#888;">${look.designer}</div><div class="items">`;
+      if(look.pairedOutfit?.name){const pi=getItemImg(look,'paired',0);html+=`<div class="item"><span class="cb"></span>${pi?`<img src="${pi}"/>`:'👘'}<span>${look.pairedOutfit.name}</span></div>`;}
+      (look.jewellery||[]).forEach((j,ji)=>{if(!j.name)return;const ji2=getItemImg(look,'jwl',ji);html+=`<div class="item"><span class="cb"></span>${ji2?`<img src="${ji2}"/>`:'💍'}<span>${j.name}</span></div>`;});
+      if(look.shoes?.name){const si=getItemImg(look,'shoe',0);html+=`<div class="item"><span class="cb"></span>${si?`<img src="${si}"/>`:'👠'}<span>${look.shoes.name}</span></div>`;}
+      html+=`</div></div></div>`;
+    });
+  });
+  html+='</body></html>';
+  const w=window.open('','_blank'); w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),400);
 }
 
 // ══ PRINT PDF ══
