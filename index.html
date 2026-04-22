@@ -1275,8 +1275,9 @@ async function saveToDrive(){
 // ════════════════════════════════════════════
 let compressionDone = false;
 async function compressAllExistingPhotos(){
-  if(compressionDone) return;
+  if(compressionDone || localStorage.getItem('np_compress_done_v1')) return;
   compressionDone = true;
+  localStorage.setItem('np_compress_done_v1', '1');
   let changed = 0;
 
   async function compressBase64(b64){
